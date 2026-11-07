@@ -24,7 +24,7 @@ enabled = true
 [vars]
 SITE_URL = "https://helperhub.au"
 PLATFORM_NAME = "HelperHub"
-EMAIL_PROVIDER = "log"
+EMAIL_PROVIDER = "brevo"
 FROM_EMAIL = "hello@helperhub.au"
 DAILY_EMAIL_LIMIT = "280"
 NEW_GROUP_EMAIL_LIMIT = "40"
