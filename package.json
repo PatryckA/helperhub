@@ -1,0 +1,16 @@
+{
+  "name": "helperhub",
+  "version": "1.0.0",
+  "description": "Free volunteer sign-ups for community groups",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8788",
+    "deploy": "wrangler deploy"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "wrangler": "^4.158.0"
+  },
+  "private": true
+}

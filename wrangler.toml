@@ -1,0 +1,31 @@
+name = "helperhub"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+html_handling = "none"
+not_found_handling = "none"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "helperhub"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[triggers]
+crons = ["7 * * * *"]
+
+[observability]
+enabled = true
+
+[vars]
+SITE_URL = "https://helperhub.au"
+PLATFORM_NAME = "HelperHub"
+EMAIL_PROVIDER = "log"
+FROM_EMAIL = "hello@helperhub.au"
+DAILY_EMAIL_LIMIT = "280"
+NEW_GROUP_EMAIL_LIMIT = "40"
+GROUP_EMAIL_LIMIT = "150"
+TURNSTILE_SITE_KEY = ""

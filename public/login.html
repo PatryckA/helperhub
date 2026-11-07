@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Organiser login | HelperHub</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/assets/hh.css">
+  <script src="/assets/hh.js"></script>
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="wrap">
+    <div id="content"><div class="spinner"></div></div>
+  </main>
+  <script>
+    platformHeader('<a href="/start">Set up a group</a>');
+    siteFooter();
+
+    (async () => {
+      // Already logged in? Show their groups.
+      if (session.get()) {
+        try {
+          const me = await api('/api/me', { auth: true });
+          return showGroups(me);
+        } catch { session.clear(); }
+      }
+      showForm();
+    })();
+
+    function showGroups(me) {
+      if (me.groups.length === 1 && !me.is_owner && !new URLSearchParams(location.search).has('choose')) {
+        location.replace(`/${me.groups[0].slug}/admin`);
+        return;
+      }
+      $('#content').innerHTML = `
+        <h1>Hi ${esc(me.user.name || me.user.email)}</h1>
+        <p class="lead">Which group do you want to manage?</p>
+        <div class="stack">${me.groups.map(g => `<a class="card event-card" href="/${esc(g.slug)}/admin"><h3>${esc(g.name)}</h3><div class="meta">helperhub.au/${esc(g.slug)}${g.status !== 'active' ? ` · ${esc(g.status)}` : ''}</div></a>`).join('') || '<p class="muted">You are not an organiser of any group yet.</p>'}</div>
+        ${me.is_owner ? '<p style="margin-top:18px"><a class="btn secondary" href="/owner">Owner dashboard</a></p>' : ''}
+        <p style="margin-top:18px"><a href="/start">Set up another group</a> · <button class="btn link" id="logout">Log out</button></p>`;
+      $('#logout').onclick = () => { session.clear(); showForm(); };
+    }
+
+    function showForm() {
+      $('#content').innerHTML = `
+        <div class="card" style="max-width:440px;margin:30px auto">
+          <h1 style="margin-top:4px">Organiser login</h1>
+          <p class="muted">Enter your email and we'll send you a link to log in. No password needed.</p>
+          <form id="form">
+            <label for="email">Email</label>
+            <input id="email" type="email" autocomplete="email" inputmode="email" required>
+            <div id="msg"></div>
+            <button class="btn block" style="margin-top:16px" id="go">Email me a login link</button>
+          </form>
+          <p class="small muted" style="margin-top:16px">New here? <a href="/start">Set up your group</a>.</p>
+        </div>`;
+      $('#email').focus();
+      $('#form').addEventListener('submit', async e => {
+        e.preventDefault();
+        const btn = $('#go');
+        btn.disabled = true;
+        try {
+          await api('/api/auth/request', { method: 'POST', body: { email: $('#email').value } });
+          $('#form').innerHTML = `<div class="success">If <strong>${esc($('#email').value)}</strong> is an organiser's email, a login link is on its way. It works for 30 minutes. Check your junk folder if you can't see it.</div>`;
+        } catch (err) {
+          $('#msg').innerHTML = `<div class="error">${esc(err.message)}</div>`;
+          btn.disabled = false;
+        }
+      });
+    }
+  </script>
+</body>
+</html>

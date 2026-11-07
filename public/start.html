@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Set up your group | HelperHub</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/assets/hh.css">
+  <script src="/assets/hh.js"></script>
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="wrap">
+    <div id="form-view">
+      <h1>Set up your group</h1>
+      <p class="lead">Free for schools, clubs and community groups. You can change any of this later.</p>
+      <form id="form" class="card" novalidate>
+        <label for="name">Group name</label>
+        <input id="name" type="text" maxlength="80" placeholder="e.g. Newington Netball Club" required>
+
+        <label for="slug">Web address</label>
+        <div style="display:flex;align-items:center;gap:6px"><span class="muted" style="white-space:nowrap">helperhub.au/</span><input id="slug" type="text" maxlength="40" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
+        <div class="slug-preview" id="slug-msg">&nbsp;</div>
+
+        <label for="kind">Type of group</label>
+        <select id="kind">
+          <option value="school">School P&amp;C / parents' association</option>
+          <option value="sport">Sports club</option>
+          <option value="community">Community group or charity</option>
+          <option value="other">Other</option>
+        </select>
+
+        <div class="row">
+          <div><label for="your_name">Your name</label><input id="your_name" type="text" autocomplete="name" maxlength="80" required></div>
+          <div><label for="email">Your email</label><input id="email" type="email" autocomplete="email" inputmode="email" maxlength="200" required></div>
+        </div>
+        <p class="small muted">We'll email you a link to confirm. That's also how you log in, so there's no password to remember.</p>
+
+        <div class="hp" aria-hidden="true"><label>Leave this empty<input name="website" id="website" tabindex="-1" autocomplete="off"></label></div>
+        <div id="turnstile" style="margin-top:14px"></div>
+
+        <label class="check" style="margin-top:16px"><input type="checkbox" id="agree"> I agree to the <a href="/terms" target="_blank">terms</a> and <a href="/privacy" target="_blank">privacy notice</a>, and I'm organising this on behalf of the group.</label>
+        <div id="err"></div>
+        <button class="btn block" id="submit" style="margin-top:16px">Create my group</button>
+      </form>
+    </div>
+    <div id="done-view" class="hidden"></div>
+  </main>
+  <script>
+    platformHeader('<a href="/login">Already set up? Log in</a>');
+    siteFooter();
+    let slugEdited = false, slugTimer, turnstileToken = '';
+
+    function slugify(s) {
+      return s.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/&/g, ' and ')
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+    }
+    $('#name').addEventListener('input', () => { if (!slugEdited) { $('#slug').value = slugify($('#name').value); checkSlug(); } });
+    $('#slug').addEventListener('input', () => { slugEdited = true; checkSlug(); });
+    $('#slug').addEventListener('blur', () => { $('#slug').value = slugify($('#slug').value); checkSlug(); });
+
+    function checkSlug() {
+      clearTimeout(slugTimer);
+      const v = slugify($('#slug').value);
+      if (!v) { $('#slug-msg').innerHTML = '&nbsp;'; return; }
+      $('#slug-msg').textContent = 'Checking…';
+      slugTimer = setTimeout(async () => {
+        try {
+          const r = await api('/api/groups/check-slug?slug=' + encodeURIComponent(v));
+          $('#slug-msg').innerHTML = r.available
+            ? `<span class="ok">✓ helperhub.au/${esc(r.slug)} is available</span>`
+            : `<span class="bad">${esc(r.reason)}</span>`;
+        } catch { $('#slug-msg').textContent = ''; }
+      }, 350);
+    }
+
+    // Bot check (Cloudflare Turnstile), only if the site has one configured
+    (async () => {
+      try {
+        const cfg = await api('/api/config');
+        if (!cfg.turnstile_site_key) return;
+        window.onTurnstileLoad = () => turnstile.render('#turnstile', { sitekey: cfg.turnstile_site_key, callback: t => (turnstileToken = t), 'expired-callback': () => (turnstileToken = '') });
+        const s = document.createElement('script');
+        s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad';
+        s.async = true;
+        document.head.appendChild(s);
+      } catch { /* ignore */ }
+    })();
+
+    $('#form').addEventListener('submit', async e => {
+      e.preventDefault();
+      $('#err').innerHTML = '';
+      const body = {
+        name: $('#name').value, slug: slugify($('#slug').value), kind: $('#kind').value,
+        your_name: $('#your_name').value, email: $('#email').value, agree: $('#agree').checked,
+        website: $('#website').value, turnstile: turnstileToken,
+      };
+      const missing = [['name', 'group name'], ['your_name', 'your name'], ['email', 'email']].filter(([k]) => !String(body[k]).trim());
+      if (missing.length) { $('#err').innerHTML = `<div class="error">Please fill in ${missing.map(m => m[1]).join(', ')}.</div>`; return; }
+      if (!body.agree) { $('#err').innerHTML = '<div class="error">Please tick the box to agree to the terms.</div>'; return; }
+      const btn = $('#submit');
+      btn.disabled = true; btn.textContent = 'Setting up…';
+      try {
+        const r = await api('/api/groups', { method: 'POST', body });
+        $('#form-view').classList.add('hidden');
+        $('#done-view').classList.remove('hidden');
+        $('#done-view').innerHTML = `
+          <div class="card center" style="margin-top:30px">
+            <div style="font-size:44px">📬</div>
+            <h1 style="margin-top:6px">Check your email</h1>
+            <p>We've sent a link to <strong>${esc(r.email)}</strong>. Click it to confirm and open your group's organiser page.</p>
+            <p class="small muted">It can take a minute to arrive. If it's not there, check your junk folder. The link works for 48 hours.</p>
+          </div>`;
+      } catch (err) {
+        $('#err').innerHTML = `<div class="error">${esc(err.message)}</div>`;
+        if (window.turnstile) { try { turnstile.reset(); turnstileToken = ''; } catch { /* ignore */ } }
+      } finally {
+        btn.disabled = false; btn.textContent = 'Create my group';
+      }
+    });
+  </script>
+</body>
+</html>

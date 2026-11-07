@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Volunteer sign-up</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/assets/hh.css">
+  <script src="/assets/hh.js"></script>
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="wrap"><div id="content"><div class="spinner"></div></div></main>
+  <script>
+    (async () => {
+      const box = $('#content');
+      try {
+        const { group, events } = await api(`/api/g/${groupSlug()}/events`);
+        groupHeader(group);
+        siteFooter(group);
+        box.innerHTML = `
+          <h1>Volunteer with ${esc(group.name)}</h1>
+          <p class="lead">${group.welcome_text ? nl2br(group.welcome_text) : 'Thank you for helping out! Pick an event below to see what is needed.'}</p>
+          <div class="stack">${events.length ? events.map(e => `
+            <a class="card event-card" href="/${esc(group.slug)}/event/${e.id}">
+              <h3>${esc(e.title)}</h3>
+              <div class="meta">${esc(fmtRange(e.first_date, e.last_date))}${e.location ? ' · ' + esc(e.location) : ''}</div>
+              <div style="margin-top:8px">${e.open > 0 ? `<span class="badge">${e.open} spot${e.open === 1 ? '' : 's'} open</span>` : '<span class="badge full">All filled, thank you!</span>'}</div>
+            </a>`).join('') : `<div class="card center"><p><strong>No events need volunteers right now.</strong></p><p class="muted">Check back soon, and thank you for offering to help!</p></div>`}
+          </div>
+          ${group.contact_email || group.contact_name ? `<p class="small muted" style="margin-top:24px">Questions? Contact ${group.contact_email ? `<a href="mailto:${esc(group.contact_email)}">${esc(group.contact_name || group.contact_email)}</a>` : esc(group.contact_name)}.</p>` : ''}`;
+      } catch (err) {
+        platformHeader();
+        siteFooter();
+        box.innerHTML = `<h1>Hmm.</h1><div class="notice">${esc(err.message)}</div><p><a href="/">Go to HelperHub</a></p>`;
+      }
+    })();
+  </script>
+</body>
+</html>

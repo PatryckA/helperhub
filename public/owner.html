@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>Owner | HelperHub</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/assets/hh.css">
+  <script src="/assets/hh.js"></script>
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="wrap wide" id="app"><div class="spinner"></div></main>
+  <div id="modal-root"></div>
+  <script>
+    platformHeader('<a href="/login?choose=1">My groups</a>');
+    siteFooter();
+
+    async function load() {
+      if (!session.get()) return location.replace('/login');
+      let data;
+      try { data = await api('/api/owner/groups', { auth: true }); }
+      catch (err) {
+        if (err.status === 401) return location.replace('/login');
+        $('#app').innerHTML = `<div class="error" style="margin-top:20px">${esc(err.message)}</div>`;
+        return;
+      }
+      const e = data.email;
+      $('#app').innerHTML = `
+        <h1>Owner dashboard</h1>
+        <div class="card small">
+          <span class="stat"><b>${data.groups.length}</b>groups</span>
+          <span class="stat"><b>${e.sent_24h} / ${e.daily_limit}</b>emails (24h)</span>
+          <span class="stat"><b>${e.queued}</b>queued</span>
+          <span class="stat"><b>${e.failed_7d}</b>failed (7 days)</span>
+          <span class="stat"><b>${esc(e.provider)}</b>email provider</span>
+          ${e.last_error ? `<div class="error" style="margin-top:10px">Last email error: ${esc(e.last_error)}</div>` : ''}
+          <div style="margin-top:10px"><button class="btn secondary small" id="flush">Send queued emails now</button></div>
+        </div>
+        <h2>Groups</h2>
+        <table class="list"><thead><tr><th>Group</th><th>Status</th><th class="hide-sm">Organisers</th><th>Events / sign-ups</th><th class="hide-sm">Emails 7d</th><th></th></tr></thead><tbody>
+          ${data.groups.map(g => `<tr>
+            <td><a href="/${esc(g.slug)}" target="_blank"><strong>${esc(g.name)}</strong></a><div class="small muted">/${esc(g.slug)} · ${esc(g.kind)} · ${esc((g.created_at || '').slice(0, 10))}</div></td>
+            <td>${g.status === 'active' ? '<span class="badge">Active</span>' : g.status === 'suspended' ? `<span class="badge draft">Suspended</span><div class="small muted">${esc(g.suspended_reason)}</div>` : '<span class="badge full">Unconfirmed</span>'}</td>
+            <td class="hide-sm small">${esc(g.organisers || '')}</td>
+            <td>${g.events} / ${g.signups}</td>
+            <td class="hide-sm">${g.emails_7d}${g.queued ? ` <span class="muted">(+${g.queued} queued)</span>` : ''}<div class="small muted">cap ${g.cap}/day</div></td>
+            <td class="actions"><a class="btn secondary small" href="/${esc(g.slug)}/admin">Open</a> <button class="btn secondary small" data-edit="${g.id}">Manage</button></td>
+          </tr>`).join('')}
+        </tbody></table>`;
+      $('#flush').onclick = async () => { try { await api('/api/owner/process-queue', { method: 'POST', auth: true }); toast('Queue processed.'); load(); } catch (err) { toast(err.message, 'bad'); } };
+      $$('[data-edit]').forEach(b => b.onclick = () => manage(data.groups.find(g => g.id === +b.dataset.edit)));
+    }
+
+    function manage(g) {
+      const root = $('#modal-root');
+      root.innerHTML = `<div class="modal-backdrop"><div class="modal">
+        <h2>${esc(g.name)}</h2>
+        <label>Status</label>
+        <select id="o-status"><option value="active" ${g.status === 'active' ? 'selected' : ''}>Active</option><option value="suspended" ${g.status === 'suspended' ? 'selected' : ''}>Suspended (page hidden, emails stopped)</option></select>
+        <label>Reason shown to organisers <span class="opt">(if suspended)</span></label><input id="o-reason" type="text" value="${esc(g.suspended_reason || '')}">
+        <label>Daily email cap <span class="opt">(blank = automatic: 40 for new groups, 150 after 2 weeks)</span></label><input id="o-cap" type="number" min="0" value="${g.email_limit ?? ''}">
+        <div class="actions"><button class="btn secondary" id="o-cancel">Cancel</button><button class="btn" id="o-save">Save</button></div>
+      </div></div>`;
+      $('#o-cancel').onclick = () => (root.innerHTML = '');
+      $('#o-save').onclick = async () => {
+        try {
+          await api(`/api/owner/groups/${g.id}`, { method: 'POST', auth: true, body: { status: $('#o-status').value, reason: $('#o-reason').value, email_limit: $('#o-cap').value } });
+          root.innerHTML = ''; toast('Saved.'); load();
+        } catch (err) { toast(err.message, 'bad'); }
+      };
+    }
+    load();
+  </script>
+</body>
+</html>

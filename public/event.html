@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Volunteer sign-up</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/assets/hh.css">
+  <script src="/assets/hh.js"></script>
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="wrap">
+    <p style="margin:16px 0 0"><a id="back" href="/">&larr; All events</a></p>
+    <div id="content"><div class="spinner"></div></div>
+  </main>
+
+  <div class="actionbar" id="actionbar">
+    <div class="inner">
+      <span id="selcount"></span>
+      <button class="btn" id="continue">Sign up</button>
+    </div>
+  </div>
+
+  <div class="sheet-backdrop" id="backdrop"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <button class="close" id="close" aria-label="Close">&times;</button>
+    <div id="form-view">
+      <h2 id="sheet-title">Your details</h2>
+      <div class="picked" id="picked"></div>
+      <form id="form" novalidate>
+        <div id="item-fields"></div>
+        <div class="row">
+          <div><label for="first_name">First name</label><input id="first_name" name="first_name" type="text" autocomplete="given-name" required></div>
+          <div><label for="last_name">Last name</label><input id="last_name" name="last_name" type="text" autocomplete="family-name" required></div>
+        </div>
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required>
+        <label for="mobile">Mobile</label>
+        <input id="mobile" name="mobile" type="tel" autocomplete="tel" inputmode="tel" placeholder="0412 345 678" required>
+        <div id="question-box" class="hidden"><label for="answer" id="question-label"></label><input id="answer" name="answer" type="text" maxlength="200"></div>
+        <label for="comments">Comments <span class="opt">(optional)</span></label>
+        <textarea id="comments" name="comments" placeholder="Anything the organiser should know?"></textarea>
+        <div class="hp" aria-hidden="true"><label>Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label></div>
+        <label class="check"><input type="checkbox" id="remember" checked> Remember my details on this device</label>
+        <div id="form-error"></div>
+        <button class="btn block" type="submit" id="submit" style="margin-top:16px">Confirm sign-up</button>
+        <p class="small muted center">Your contact details are only shared with the event organisers. Other volunteers just see your first name and last initial.</p>
+      </form>
+    </div>
+    <div id="done-view" class="hidden"></div>
+  </div>
+
+  <script>
+    const slug = groupSlug();
+    const id = location.pathname.split('/')[3];
+    let group = null;
+    $('#back').href = '/' + slug;
+    const selected = new Set();
+    let event = null;
+
+    async function load() {
+      const box = $('#content');
+      try {
+        const first = !group;
+        ({ event, group } = await api(`/api/g/${slug}/events/${encodeURIComponent(id || '')}`));
+        if (first) { groupHeader(group); siteFooter(group); }
+      } catch (err) {
+        if (!group) { platformHeader(); siteFooter(); }
+        box.innerHTML = `<div class="error">${esc(err.message)}</div>`;
+        return;
+      }
+      document.title = `${event.title} | ${group.name}`;
+      const byDate = {};
+      const shifts = event.slots.filter(s => s.kind !== 'item');
+      const items = event.slots.filter(s => s.kind === 'item');
+      for (const s of shifts) (byDate[s.date] ||= []).push(s);
+      const anyOpen = event.slots.some(s => !s.closed && s.filled < s.capacity);
+      box.innerHTML = `
+        <h1>${esc(event.title)}</h1>
+        ${event.location ? `<p class="muted" style="margin:0">📍 ${esc(event.location)}</p>` : ''}
+        ${event.description ? `<p>${nl2br(event.description)}</p>` : ''}
+        <p class="small muted">${anyOpen ? 'Tap everything you can help with, then press <strong>Sign up</strong>.' : 'Everything is covered. Thank you to all our volunteers!'}</p>
+        ${items.length ? `
+          <div class="day-heading">Things to bring</div>
+          ${event.dropoff_date ? `<p class="small" style="margin:-4px 0 10px">Please drop off by <strong>${fmtTime(event.dropoff_time)}, ${esc(fmtDate(event.dropoff_date))}</strong>${event.dropoff_note ? ` · ${esc(event.dropoff_note)}` : ''}</p>` : ''}
+          <div class="stack">${items.map(itemHtml).join('')}</div>` : ''}
+        ${event.donation_url ? donateHtml() : ''}
+        ${Object.entries(byDate).map(([date, slots]) => `
+          <div class="day-heading">${items.length ? 'Helping on ' : ''}${esc(fmtDate(date))}</div>
+          <div class="stack">${slots.map(slotHtml).join('')}</div>`).join('')}
+        ${event.contact_name || event.contact_email ? `<p class="small muted" style="margin-top:28px">Questions? Contact ${event.contact_email
+          ? `<a href="mailto:${esc(event.contact_email)}">${esc(event.contact_name || event.contact_email)}</a>` : esc(event.contact_name)}.</p>` : ''}`;
+      $$('.slot:not(.disabled)').forEach(el => el.addEventListener('click', () => toggle(+el.dataset.id, el)));
+      $$('.slot:not(.disabled)').forEach(el => el.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(+el.dataset.id, el); } }));
+      // keep previously ticked slots ticked after a reload
+      for (const sid of [...selected]) {
+        const el = $(`.slot[data-id="${sid}"]`);
+        if (el && !el.classList.contains('disabled')) el.classList.add('selected'); else selected.delete(sid);
+      }
+      updateBar();
+    }
+
+    function slotHtml(s) {
+      const full = s.filled >= s.capacity;
+      const left = s.capacity - s.filled;
+      const disabled = full || s.closed;
+      const status = s.closed ? 'Closed' : full ? 'Full, thank you!' : `${left} of ${s.capacity} spot${s.capacity === 1 ? '' : 's'} left`;
+      return `
+        <div class="card slot${disabled ? ' disabled' : ''}" data-id="${s.id}" ${disabled ? '' : 'tabindex="0" role="checkbox" aria-checked="false"'}>
+          <span class="tick" aria-hidden="true">${disabled ? '' : ''}</span>
+          <div class="body">
+            <div class="time">${fmtTime(s.start_time)} to ${fmtTime(s.end_time)}</div>
+            <div class="title">${esc(s.title)}</div>
+            ${s.details ? `<div class="details">${nl2br(s.details)}</div>` : ''}
+            <div class="fill">${status}</div>
+            <div class="bar"><i style="width:${Math.min(100, (s.filled / s.capacity) * 100)}%"></i></div>
+            ${s.names.length ? `<div class="names">${s.names.map(n => `<span>${esc(n)}</span>`).join('')}</div>` : ''}
+          </div>
+        </div>`;
+    }
+
+    function donateHtml() {
+      return `
+        <div class="card donate">
+          <div><strong>Prefer to donate instead?</strong><br><span class="muted">${esc(event.donation_text || "Can't bring something? You're welcome to donate instead.")}</span></div>
+          <a class="btn" href="${esc(event.donation_url)}" target="_blank" rel="noopener">Donate</a>
+        </div>`;
+    }
+
+    function itemHtml(s) {
+      const full = s.filled >= s.capacity;
+      const left = s.capacity - s.filled;
+      const disabled = full || s.closed;
+      const status = s.closed ? 'Closed' : full ? 'All covered, thank you!' : `${left} of ${s.capacity} still needed`;
+      return `
+        <div class="card slot${disabled ? ' disabled' : ''}" data-id="${s.id}" ${disabled ? '' : 'tabindex="0" role="checkbox" aria-checked="false"'}>
+          <span class="tick" aria-hidden="true"></span>
+          <div class="body">
+            <div class="title">${esc(s.title)}</div>
+            ${s.details ? `<div class="details">${nl2br(s.details)}</div>` : ''}
+            <div class="fill">${status}</div>
+            <div class="bar"><i style="width:${Math.min(100, (s.filled / s.capacity) * 100)}%"></i></div>
+            ${s.entries && s.entries.length ? `<ul class="bringing">${s.entries.map(e => `<li><strong>${esc(e.item)}</strong> <span class="muted">from ${esc(e.name)}</span>${e.dietary.length ? ` ${e.dietary.map(d => `<span class="diet">${esc(d)}</span>`).join('')}` : ''}</li>`).join('')}</ul>` : ''}
+          </div>
+        </div>`;
+    }
+
+    const DIETARY = [['veg', 'Vegetarian'], ['vegan', 'Vegan'], ['gf', 'Gluten free'], ['nf', 'Nut free'], ['df', 'Dairy free']];
+
+    function toggle(sid, el) {
+      if (selected.has(sid)) selected.delete(sid); else selected.add(sid);
+      el.classList.toggle('selected', selected.has(sid));
+      el.setAttribute('aria-checked', selected.has(sid));
+      updateBar();
+    }
+    function updateBar() {
+      $('#actionbar').classList.toggle('show', selected.size > 0);
+      $('#selcount').textContent = `${selected.size} selected`;
+    }
+
+    function openSheet() {
+      const picked = event.slots.filter(s => selected.has(s.id));
+      const pickedShifts = picked.filter(s => s.kind !== 'item');
+      const pickedItems = picked.filter(s => s.kind === 'item');
+      $('#picked').classList.toggle('hidden', !pickedShifts.length);
+      $('#picked').innerHTML = pickedShifts.map(s => `<div><strong>${esc(s.title)}</strong><br>${esc(fmtDateShort(s.date))}, ${fmtTime(s.start_time)} to ${fmtTime(s.end_time)}</div>`).join('');
+      // keep anything already typed if the sheet is reopened
+      const prev = {};
+      $$('#item-fields [data-item]').forEach(b => { prev[b.dataset.item] = { desc: $('input[type=text]', b).value, diet: $$('input[type=checkbox]:checked', b).map(c => c.value) }; });
+      $('#item-fields').innerHTML = pickedItems.map(s => `
+        <div class="item-block" data-item="${s.id}">
+          <label for="item-${s.id}">What will you bring for <em>${esc(s.title)}</em>?</label>
+          <input id="item-${s.id}" type="text" maxlength="120" placeholder="e.g. Chicken curry" value="${esc(prev[s.id]?.desc || '')}" required>
+          ${s.entries && s.entries.length ? `<div class="small muted" style="margin-top:4px">Already coming: ${s.entries.map(e => esc(e.item)).join(', ')}</div>` : ''}
+          <div class="diet-choices">${DIETARY.map(([code, label]) => `<label class="chip"><input type="checkbox" value="${code}" ${prev[s.id]?.diet.includes(code) ? 'checked' : ''}> ${label}</label>`).join('')}</div>
+        </div>`).join('');
+      if (group.question_label) {
+        $('#question-box').classList.remove('hidden');
+        $('#question-label').innerHTML = esc(group.question_label) + (group.question_required ? '' : ' <span class="opt">(optional)</span>');
+      }
+      const saved = store.get('hh_volunteer');
+      if (saved) for (const k of ['first_name', 'last_name', 'email', 'mobile']) if (!$('#' + k).value) $('#' + k).value = saved[k] || '';
+      $('#form-view').classList.remove('hidden');
+      $('#done-view').classList.add('hidden');
+      $('#form-error').innerHTML = '';
+      $('#backdrop').classList.add('show');
+      $('#sheet').classList.add('show');
+      setTimeout(() => { const first = $$('#form input[required]').find(i => !i.value); (first || $('#submit')).focus(); }, 250);
+    }
+    function closeSheet() {
+      $('#backdrop').classList.remove('show');
+      $('#sheet').classList.remove('show');
+    }
+    $('#continue').addEventListener('click', openSheet);
+    $('#close').addEventListener('click', closeSheet);
+    $('#backdrop').addEventListener('click', closeSheet);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
+
+    $('#form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const f = e.target;
+      const data = Object.fromEntries(new FormData(f));
+      const missing = ['first_name', 'last_name', 'email', 'mobile'].filter(k => !String(data[k] || '').trim());
+      if (group.question_label && group.question_required && !String(data.answer || '').trim()) missing.push('answer');
+      if (missing.length) {
+        $('#form-error').innerHTML = `<div class="error">Please fill in ${missing.map(k => k === 'answer' ? `"${esc(group.question_label)}"` : 'your ' + k.replace('_', ' ')).join(', ')}.</div>`;
+        $('#' + missing[0]).focus();
+        return;
+      }
+      data.slot_ids = [...selected];
+      data.items = {};
+      for (const b of $$('#item-fields [data-item]')) {
+        const desc = $('input[type=text]', b);
+        if (!desc.value.trim()) {
+          $('#form-error').innerHTML = '<div class="error">Please say what you\'ll bring.</div>';
+          desc.focus();
+          return;
+        }
+        data.items[b.dataset.item] = { item_desc: desc.value.trim(), dietary: $$('input[type=checkbox]:checked', b).map(c => c.value) };
+      }
+      const btn = $('#submit');
+      btn.disabled = true; btn.textContent = 'Signing you up…';
+      try {
+        const res = await api(`/api/g/${slug}/signups`, { method: 'POST', body: data });
+        if ($('#remember').checked) store.set('hh_volunteer', { first_name: data.first_name, last_name: data.last_name, email: data.email, mobile: data.mobile });
+        else store.del('hh_volunteer');
+        if (!res.ok) {
+          $('#form-error').innerHTML = `<div class="error">${res.problems.map(p => esc(p.reason)).join('<br>')}</div>`;
+          selected.clear();
+          await load();
+          return;
+        }
+        const ok = event.slots.filter(s => res.created.some(c => c.slot_id === s.id));
+        const describe = s => s.kind === 'item'
+          ? `<div><strong>Bringing ${esc(data.items[s.id].item_desc)}</strong> (${esc(s.title)})<br>Drop off by ${fmtTime(s.start_time)}, ${esc(fmtDateShort(s.date))}</div>`
+          : `<div><strong>${esc(s.title)}</strong><br>${esc(fmtDateShort(s.date))}, ${fmtTime(s.start_time)} to ${fmtTime(s.end_time)}</div>`;
+        $('#form-view').classList.add('hidden');
+        $('#done-view').classList.remove('hidden');
+        $('#done-view').innerHTML = `
+          <div class="center" style="font-size:44px;margin-top:6px">🎉</div>
+          <h2 class="center">Thank you, ${esc(data.first_name)}!</h2>
+          <p class="center">You're signed up for:</p>
+          <div class="picked">${ok.map(describe).join('')}</div>
+          ${res.problems.length ? `<div class="notice">${res.problems.map(p => esc(p.reason)).join('<br>')}</div>` : ''}
+          <p>We've emailed a confirmation to <strong>${esc(data.email)}</strong>. It has a link to change or cancel, and we'll remind you the day before.</p>
+          <a class="btn block secondary" href="/manage${esc(new URL(res.manage_url).search)}">View my sign-up</a>
+          <button class="btn block" style="margin-top:10px" onclick="closeSheet()">Done</button>`;
+        $('#comments').value = '';
+        $('#item-fields').innerHTML = '';
+        selected.clear();
+        load();
+      } catch (err) {
+        $('#form-error').innerHTML = `<div class="error">${esc(err.message)}</div>`;
+      } finally {
+        btn.disabled = false; btn.textContent = 'Confirm sign-up';
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>
