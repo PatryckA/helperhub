@@ -12,7 +12,7 @@ not_found_handling = "none"
 [[d1_databases]]
 binding = "DB"
 database_name = "helperhub"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "74e14ca7-dc49-4eca-9eea-5c232c7296b3"
 
 [triggers]
 crons = ["7 * * * *"]
