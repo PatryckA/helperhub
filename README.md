@@ -2,7 +2,7 @@
 
 Free, ad-free volunteer sign-ups for schools, clubs and community groups, at **helperhub.au**.
 
-- Any group can set itself up at `helperhub.au/start` and gets its own page, e.g. `helperhub.au/newington-netball-club`, with its own logo and colours.
+- Any group can set itself up at `helperhub.au/start` and gets its own page, e.g. `helperhub.au/riverside-football-club`, with its own logo and colours.
 - Volunteers sign up without an account (name, email, mobile), for time slots or "things to bring", and get a confirmation, a calendar invite and a reminder.
 - Organisers log in with an emailed link (no passwords), and a group can have several organisers.
 - The owner (you) has a dashboard at `helperhub.au/owner` to see every group, change email limits and suspend misuse.
@@ -29,7 +29,7 @@ In Cloudflare: **Domains > Onboard a domain**, enter `helperhub.au`, choose **Fr
 **Storage & databases > D1 > Create database**, name `helperhub`. Copy its **Database ID** into `wrangler.toml` (`database_id = "..."`). Then open the database's **Console** tab, paste the contents of `schema-oneline.sql` and click **Execute**. The Overview should then list tables such as `groups`, `events` and `signups`.
 
 ### 3. Connect the Worker to GitHub
-**Workers & Pages > Create > Import a repository**, choose `PatryckA/helperhub`, and keep the defaults (deploy command `npx wrangler deploy`). Cloudflare builds and deploys it as a Worker called `helperhub`.
+**Workers & Pages > Create > Import a repository**, choose this repository, and keep the defaults (deploy command `npx wrangler deploy`). Cloudflare builds and deploys it as a Worker called `helperhub`.
 
 ### 4. Secrets
 In the `helperhub` Worker: **Settings > Variables and Secrets > Add**, type **Secret**:

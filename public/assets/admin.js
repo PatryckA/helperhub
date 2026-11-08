@@ -181,8 +181,8 @@
           <div><label for="f-cn">Contact name <span class="opt">(optional)</span></label><input id="f-cn" data-k="contact_name" type="text" value="${esc(ev.contact_name)}"></div>
           <div><label for="f-ce">Contact email <span class="opt">(replies go here)</span></label><input id="f-ce" data-k="contact_email" type="email" value="${esc(ev.contact_email)}"></div>
         </div>
-        <label for="f-du">Donation link <span class="opt">(optional: shows a "Donate instead" button, e.g. a Square link)</span></label>
-        <input id="f-du" data-k="donation_url" type="url" value="${esc(ev.donation_url || '')}" placeholder="https://square.link/...">
+        <label for="f-du">Donation link <span class="opt">(optional: shows a "Donate instead" button linking to your online donation or payment page)</span></label>
+        <input id="f-du" data-k="donation_url" type="url" value="${esc(ev.donation_url || '')}" placeholder="https://...">
         <label for="f-dx">Donation message <span class="opt">(optional)</span></label>
         <input id="f-dx" data-k="donation_text" type="text" value="${esc(ev.donation_text || '')}" placeholder="Can't bring something? You're welcome to donate instead.">
       </form>
@@ -204,7 +204,7 @@
           <div><label for="f-dt" style="margin-top:0">Drop off by</label><input id="f-dt" data-k="dropoff_time" type="time" step="300" value="${esc(ev.dropoff_time || '')}"></div>
         </div>
         <label for="f-dn">Where <span class="opt">(optional)</span></label>
-        <input id="f-dn" data-k="dropoff_note" type="text" value="${esc(ev.dropoff_note || '')}" placeholder="e.g. Staffroom kitchen">
+        <input id="f-dn" data-k="dropoff_note" type="text" value="${esc(ev.dropoff_note || '')}" placeholder="e.g. Main hall, side entrance">
       </div>
       <div id="items" class="stack"></div>
       <div id="save-err"></div>
@@ -587,7 +587,7 @@
             <input type="color" id="s-accent" value="${esc(g.accent)}" title="Pick any colour"></div>
           <div class="preview-bar" id="s-preview"></div>
           <label for="s-welcome">Welcome message <span class="opt">(top of your volunteer page)</span></label>
-          <textarea id="s-welcome" maxlength="1000" placeholder="e.g. Thanks for helping our club! Every shift makes a difference.">${esc(g.welcome_text)}</textarea>
+          <textarea id="s-welcome" maxlength="1000" placeholder="e.g. Thanks for helping out! Every shift makes a difference.">${esc(g.welcome_text)}</textarea>
         </div>
         <div class="card">
           <h2 style="margin-top:0">Contact and reminders</h2>
@@ -605,10 +605,10 @@
         <div class="card">
           <h2 style="margin-top:0">Sign-up form</h2>
           <label for="s-q">Extra question <span class="opt">(optional, asked once per sign-up)</span></label>
-          <input id="s-q" type="text" maxlength="100" value="${esc(g.question_label)}" placeholder="e.g. Which team does your child play in?  or  Child's name and class">
+          <input id="s-q" type="text" maxlength="100" value="${esc(g.question_label)}" placeholder="e.g. Which team or class are you with?">
           <label class="check" style="margin-top:10px"><input type="checkbox" id="s-qr" ${g.question_required ? 'checked' : ''}> Make it required</label>
           <label for="s-du">Default donation link <span class="opt">(pre-filled on new events; shows a "Donate instead" button)</span></label>
-          <input id="s-du" type="url" maxlength="500" value="${esc(g.donation_url)}" placeholder="https://square.link/...">
+          <input id="s-du" type="url" maxlength="500" value="${esc(g.donation_url)}" placeholder="https://...">
           <label for="s-dx">Default donation message <span class="opt">(optional)</span></label>
           <input id="s-dx" type="text" maxlength="300" value="${esc(g.donation_text)}" placeholder="Can't help on the day? You're welcome to donate instead.">
         </div>
