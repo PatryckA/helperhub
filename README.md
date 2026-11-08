@@ -59,6 +59,10 @@ Brevo's free plan adds a small Brevo logo to emails. To switch to another servic
 ### 8. Bot check on "Set up your group" (Turnstile, free)
 Cloudflare: **Turnstile > Add widget**, hostname `helperhub.au`, mode **Managed**. Put the **Site key** in `wrangler.toml` as `TURNSTILE_SITE_KEY`, and add the **Secret key** to the Worker as a Secret named `TURNSTILE_SECRET`.
 
+## Database updates
+
+When a change needs new database columns, it ships as a file in `migrations/`. Paste its last line into the D1 console once, *before* the code that uses it deploys. New installs don't need these: `schema.sql` already includes everything.
+
 ## Limits and safety
 
 - Whole-platform email cap per rolling 24 hours: `DAILY_EMAIL_LIMIT` (280, under Brevo's free 300).
@@ -66,7 +70,8 @@ Cloudflare: **Turnstile > Add widget**, hostname `helperhub.au`, mode **Managed*
 - Emails over a cap wait in the queue and go out in the next hourly run. Login links always go first.
 - New groups must confirm their email; unconfirmed groups are deleted after 7 days. Each IP can create 3 groups a day.
 - Suspending a group hides its pages, stops its emails and blocks its organisers.
-- Volunteer contact details are deleted 12 months after the event (see `public/privacy.html`).
+- Volunteer contact details, including Working with Children Check details, are deleted 12 months after the event (see `public/privacy.html`).
+- Working with Children Check numbers are shown only to that group's organisers, in the Volunteers tab. They are never emailed, printed or shown publicly.
 
 The privacy notice and terms are a plain-language starting point, not legal advice.
 

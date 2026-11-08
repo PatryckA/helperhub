@@ -247,6 +247,7 @@
           <div><label>People</label><input type="number" data-k="capacity" min="${Math.max(1, n)}" max="500" value="${esc(s.capacity)}"></div>
         </div>
         <textarea data-k="details" placeholder="Task details (optional): what's involved, what to bring, where to go">${esc(s.details)}</textarea>
+        <label class="check small" style="margin:8px 0 0"><input type="checkbox" data-wwcc ${s.needs_wwcc ? 'checked' : ''}> Needs a Working with Children Check</label>
         ${foot(s, n)}
       </div>`;
     }).join('') || '<p class="muted small">No time slots.</p>';
@@ -266,6 +267,8 @@
     $$('.slot-edit').forEach(el => {
       const s = current.slots[+el.dataset.i];
       $$('[data-k]', el).forEach(inp => inp.addEventListener('input', () => { s[inp.dataset.k] = inp.value; markDirty(); }));
+      const w = $('[data-wwcc]', el);
+      if (w) w.addEventListener('change', () => { s.needs_wwcc = w.checked ? 1 : 0; markDirty(); });
       $('[data-act=copy]', el).onclick = () => {
         current.slots.splice(+el.dataset.i + 1, 0, { ...s, id: undefined, signups: [] });
         markDirty(); renderSlots();
@@ -295,7 +298,7 @@
     if (last) {
       // continue straight after the previous slot, same length
       const mins = toMin(last.end_time) - toMin(last.start_time);
-      next = { ...next, title: last.title, details: last.details, date: last.date, capacity: last.capacity,
+      next = { ...next, title: last.title, details: last.details, date: last.date, capacity: last.capacity, needs_wwcc: last.needs_wwcc ? 1 : 0,
         start_time: last.end_time, end_time: fromMin(Math.min(toMin(last.end_time) + (mins > 0 ? mins : 60), 23 * 60 + 55)) };
     }
     current.slots.push(next);
@@ -327,6 +330,14 @@
   /* ---------------- Volunteers tab ---------------- */
   const DIET = { veg: 'Vegetarian', vegan: 'Vegan', gf: 'Gluten free', nf: 'Nut free', df: 'Dairy free' };
   const dietLabels = codes => String(codes || '').split(',').filter(c => DIET[c]).map(c => DIET[c]);
+  function wwccCell(g, s) {
+    if (!g.wwcc_number) return '<span class="badge draft">Not given</span>';
+    const exp = g.wwcc_expiry;
+    const today = new Date().toISOString().slice(0, 10);
+    const flag = !exp ? '' : exp < today ? '<span class="badge draft" style="color:var(--bad)">Expired</span>'
+      : exp < s.date ? '<span class="badge draft" style="color:var(--bad)">Expires before slot</span>' : '';
+    return `${esc(g.wwcc_number)}${exp ? `<div class="small muted">Expires ${esc(new Date(exp + 'T12:00:00').toLocaleDateString('en-AU'))}</div>` : ''}${flag}`;
+  }
   const slotLabel = s => s.kind === 'item'
     ? `Bring: ${esc(s.title)}`
     : `${esc(fmtDateShort(s.date))}, ${fmtTime(s.start_time)} to ${fmtTime(s.end_time)} · ${esc(s.title)}`;
@@ -338,10 +349,11 @@
       ${ev.slots.map(s => `
         <h2 style="font-size:17px">${slotLabel(s)}
           <span class="badge ${s.signups.length >= s.capacity ? 'full' : ''}" style="margin-left:6px">${s.signups.length}/${s.capacity}</span></h2>
-        ${s.signups.length ? `<table class="list roster"><thead><tr><th>Name</th>${group.question_label ? `<th>${esc(group.question_label)}</th>` : ''}${s.kind === 'item' ? '<th>Bringing</th>' : ''}<th>Mobile</th><th class="hide-sm">Email</th><th class="hide-sm">Comments</th><th></th></tr></thead><tbody>
+        ${s.signups.length ? `<table class="list roster"><thead><tr><th>Name</th>${group.question_label ? `<th>${esc(group.question_label)}</th>` : ''}${s.kind === 'item' ? '<th>Bringing</th>' : ''}${s.needs_wwcc ? '<th>WWCC</th>' : ''}<th>Mobile</th><th class="hide-sm">Email</th><th class="hide-sm">Comments</th><th></th></tr></thead><tbody>
           ${s.signups.map(g => `<tr>
             <td>${esc(g.first_name)} ${esc(g.last_name)}</td>
             ${group.question_label ? `<td>${esc(g.answer)}</td>` : ''}
+            ${s.needs_wwcc ? `<td>${wwccCell(g, s)}</td>` : ''}
             ${s.kind === 'item' ? `<td><strong>${esc(g.item_desc)}</strong>${dietLabels(g.dietary).map(d => `<span class="diet">${esc(d)}</span>`).join('')}</td>` : ''}
             <td><a href="tel:${esc(g.mobile.replace(/\s/g, ''))}">${esc(g.mobile)}</a></td>
             <td class="hide-sm"><a href="mailto:${esc(g.email)}">${esc(g.email)}</a></td>
@@ -378,6 +390,7 @@
         <div><label>People per shift</label><input type="number" id="r-cap" min="1" value="${esc(last.capacity || 2)}"></div></div>
       <div class="row"><div><label>From</label><input type="time" id="r-from" value="09:00" step="300"></div>
         <div><label>To</label><input type="time" id="r-to" value="13:00" step="300"></div></div>
+      <label class="check" style="margin-top:14px"><input type="checkbox" id="r-wwcc" ${last.needs_wwcc ? 'checked' : ''}> Needs a Working with Children Check</label>
       <label>Shift length</label>
       <select id="r-len"><option value="30">30 minutes</option><option value="60" selected>1 hour</option><option value="90">1.5 hours</option><option value="120">2 hours</option><option value="180">3 hours</option></select>
       <div id="r-err"></div>
@@ -390,7 +403,7 @@
         // drop a blank starter slot if that's all there is
         dropBlankStarter();
         for (let t = from; t < to; t += len) {
-          current.slots.push({ title, details: $('#r-details', m).value, date, start_time: fromMin(t), end_time: fromMin(Math.min(t + len, to)), capacity: +$('#r-cap', m).value || 1, signups: [] });
+          current.slots.push({ title, details: $('#r-details', m).value, date, start_time: fromMin(t), end_time: fromMin(Math.min(t + len, to)), capacity: +$('#r-cap', m).value || 1, needs_wwcc: $('#r-wwcc', m).checked ? 1 : 0, signups: [] });
         }
         close(); markDirty(); renderSlots();
       };
@@ -401,7 +414,7 @@
     modal(`
       <h2>Add a volunteer</h2>
       <label>Slot</label>
-      <select id="v-slot">${current.slots.map(s => `<option value="${s.id}" data-kind="${s.kind || 'shift'}">${s.kind === 'item' ? 'Bring: ' + esc(s.title) : `${esc(fmtDateShort(s.date))} ${fmtTime(s.start_time)}, ${esc(s.title)}`} (${s.signups.length}/${s.capacity})</option>`).join('')}</select>
+      <select id="v-slot">${current.slots.map(s => `<option value="${s.id}" data-kind="${s.kind || 'shift'}" data-wwcc="${s.needs_wwcc ? 1 : 0}">${s.kind === 'item' ? 'Bring: ' + esc(s.title) : `${esc(fmtDateShort(s.date))} ${fmtTime(s.start_time)}, ${esc(s.title)}`} (${s.signups.length}/${s.capacity})</option>`).join('')}</select>
       <div id="v-item" class="hidden">
         <label>Bringing</label><input type="text" id="v-desc" placeholder="e.g. Chicken curry">
         <div class="diet-choices">${Object.entries(DIET).map(([c, l]) => `<label class="chip"><input type="checkbox" value="${c}"> ${l}</label>`).join('')}</div>
@@ -409,6 +422,9 @@
       <div class="row"><div><label>First name</label><input type="text" id="v-first"></div><div><label>Last name</label><input type="text" id="v-last"></div></div>
       <label>Email</label><input type="email" id="v-email">
       <label>Mobile</label><input type="tel" id="v-mobile" placeholder="0412 345 678">
+      <div id="v-wwcc" class="hidden"><div class="row">
+        <div><label>WWCC number <span class="opt">(optional here)</span></label><input type="text" id="v-wn"></div>
+        <div><label>Expiry date</label><input type="date" id="v-we"></div></div></div>
       ${group.question_label ? `<label>${esc(group.question_label)}</label><input type="text" id="v-answer">` : ''}
       <label>Comments <span class="opt">(optional)</span></label><input type="text" id="v-comments">
       <label class="check" style="margin-top:14px"><input type="checkbox" id="v-send" checked> Email them a confirmation</label>
@@ -416,13 +432,17 @@
       <div id="v-err"></div>
       <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="v-go">Add volunteer</button></div>`,
     (m, close) => {
-      const syncKind = () => $('#v-item', m).classList.toggle('hidden', $('#v-slot', m).selectedOptions[0]?.dataset.kind !== 'item');
+      const syncKind = () => {
+        const o = $('#v-slot', m).selectedOptions[0];
+        $('#v-item', m).classList.toggle('hidden', o?.dataset.kind !== 'item');
+        $('#v-wwcc', m).classList.toggle('hidden', o?.dataset.wwcc !== '1');
+      };
       $('#v-slot', m).onchange = syncKind; syncKind();
       $('#v-go', m).onclick = async () => {
         try {
           const { event } = await call(A + '/signups', { method: 'POST', body: {
             slot_id: +$('#v-slot', m).value, first_name: $('#v-first', m).value, last_name: $('#v-last', m).value,
-            email: $('#v-email', m).value, mobile: $('#v-mobile', m).value, comments: $('#v-comments', m).value, send_email: $('#v-send', m).checked, answer: $('#v-answer', m)?.value || '',
+            email: $('#v-email', m).value, mobile: $('#v-mobile', m).value, comments: $('#v-comments', m).value, send_email: $('#v-send', m).checked, answer: $('#v-answer', m)?.value || '', wwcc_number: $('#v-wn', m).value, wwcc_expiry: $('#v-we', m).value,
             item_desc: $('#v-desc', m).value, dietary: $$('#v-item input:checked', m).map(c => c.value) } });
           close(); toast('Volunteer added.'); showEditor(event);
         } catch (err) { $('#v-err', m).innerHTML = `<div class="error">${esc(err.message)}</div>`; }

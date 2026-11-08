@@ -442,7 +442,7 @@ async function getPublicEvent(env, group, id) {
     FROM events WHERE id = ? AND group_id = ? AND published = 1`).bind(id, group.id).first();
   if (!ev) throw httpError(404, 'This event could not be found. It may have been removed.');
   const { results: slots } = await env.DB.prepare(
-    `SELECT id, kind, title, details, date, start_time, end_time, capacity, start_utc FROM slots WHERE event_id = ? ORDER BY date, start_time, sort_order, id`
+    `SELECT id, kind, title, details, date, start_time, end_time, capacity, start_utc, needs_wwcc FROM slots WHERE event_id = ? ORDER BY date, start_time, sort_order, id`
   ).bind(id).all();
   const { results: people } = await env.DB.prepare(
     `SELECT g.slot_id, g.first_name, g.last_name, g.item_desc, g.dietary FROM signups g JOIN slots s ON s.id = g.slot_id WHERE s.event_id = ? ORDER BY g.id`
@@ -458,6 +458,7 @@ async function getPublicEvent(env, group, id) {
       start_time: s.start_time, end_time: s.end_time, capacity: s.capacity, filled: list.length,
       names: list.map(p => displayName(p.first_name, p.last_name)),
       entries: isItem ? list.map(p => ({ name: displayName(p.first_name, p.last_name), item: p.item_desc, dietary: dietaryList(p.dietary) })) : undefined,
+      needs_wwcc: !isItem && !!s.needs_wwcc,
       closed: s.start_utc <= now,
     };
   });
@@ -476,6 +477,7 @@ async function createSignups(request, env, ctx, group) {
   if (!slotIds.length) throw httpError(400, 'Please choose at least one slot or item.');
   if (slotIds.length > MAX_SLOTS_PER_SIGNUP) throw httpError(400, 'That is a lot of slots! Please choose fewer.');
   const itemInfo = body.items && typeof body.items === 'object' ? body.items : {};
+  const wwcc = readWwcc(body); // validated only if a chosen slot needs it
 
   const token = randomToken();
   const now = new Date();
@@ -495,14 +497,20 @@ async function createSignups(request, env, ctx, group) {
       try { item = validateItem(itemInfo[slotId] || itemInfo[String(slotId)], slot.title); }
       catch (err) { problems.push({ slot_id: slotId, reason: err.message }); continue; }
     }
+    let check = { number: '', expiry: '' };
+    if (!isItem && slot.needs_wwcc) {
+      if (wwcc.error) { problems.push({ slot_id: slotId, reason: `${label} needs a Working with Children Check: ${wwcc.error}` }); continue; }
+      if (wwcc.expiry < slot.date) { problems.push({ slot_id: slotId, reason: `Your Working with Children Check expires before ${label}. Please renew it, then sign up again.` }); continue; }
+      check = wwcc;
+    }
     const dup = await env.DB.prepare(`SELECT 1 FROM signups WHERE slot_id = ? AND lower(email) = lower(?)`).bind(slotId, person.email).first();
     if (dup) { problems.push({ slot_id: slotId, reason: `You are already signed up for ${label}.` }); continue; }
     const res = await env.DB.prepare(`
-      INSERT INTO signups (slot_id, first_name, last_name, email, mobile, comments, answer, item_desc, dietary, manage_token, reminder_sent)
-      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+      INSERT INTO signups (slot_id, first_name, last_name, email, mobile, comments, answer, item_desc, dietary, manage_token, reminder_sent, wwcc_number, wwcc_expiry)
+      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
       WHERE (SELECT COUNT(*) FROM signups WHERE slot_id = ?1) < (SELECT capacity FROM slots WHERE id = ?1)`)
       .bind(slotId, person.first_name, person.last_name, person.email, person.mobile, person.comments, answer,
-        item.item_desc, item.dietary, token, slot.start_utc <= reminderCutoff ? 1 : 0).run();
+        item.item_desc, item.dietary, token, slot.start_utc <= reminderCutoff ? 1 : 0, check.number, check.expiry).run();
     if (!res.meta.changes) { problems.push({ slot_id: slotId, reason: `Sorry, ${label} has just filled up.` }); continue; }
     created.push({ slot_id: slotId });
   }
@@ -702,6 +710,7 @@ async function adminSaveEvent(request, env, group, id) {
       start_time: isItem ? ev.dropoff_time : s.start_time,
       end_time: isItem ? ev.dropoff_time : s.end_time,
       capacity: Math.max(1, Math.min(500, parseInt(s.capacity, 10) || 1)), sort_order: i,
+      needs_wwcc: !isItem && (s.needs_wwcc === true || s.needs_wwcc === 1 || s.needs_wwcc === '1') ? 1 : 0,
     };
     if (!isItem) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(slot.date || '')) throw httpError(400, `Slot ${i + 1} needs a date.`);
@@ -743,10 +752,10 @@ async function adminSaveEvent(request, env, group, id) {
     }
   }
   for (const s of slots) {
-    if (s.id) stmts.push(env.DB.prepare(`UPDATE slots SET kind=?, title=?, details=?, date=?, start_time=?, end_time=?, capacity=?, start_utc=?, sort_order=? WHERE id=? AND event_id=?`)
-      .bind(s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order, s.id, id));
-    else stmts.push(env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)`)
-      .bind(id, s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order));
+    if (s.id) stmts.push(env.DB.prepare(`UPDATE slots SET kind=?, title=?, details=?, date=?, start_time=?, end_time=?, capacity=?, start_utc=?, sort_order=?, needs_wwcc=? WHERE id=? AND event_id=?`)
+      .bind(s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order, s.needs_wwcc, s.id, id));
+    else stmts.push(env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order, needs_wwcc) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(id, s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order, s.needs_wwcc));
   }
   if (stmts.length) await env.DB.batch(stmts);
   return adminGetEvent(env, group, id);
@@ -777,8 +786,8 @@ async function adminDuplicate(request, env, group, id) {
   const newId = r.meta.last_row_id;
   const stmts = slots.map(s => {
     const date = addDays(s.date, shift);
-    return env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)`)
-      .bind(newId, s.kind, s.title, s.details, date, s.start_time, s.end_time, s.capacity, localToUtc(date, s.start_time, group.timezone).toISOString(), s.sort_order);
+    return env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order, needs_wwcc) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(newId, s.kind, s.title, s.details, date, s.start_time, s.end_time, s.capacity, localToUtc(date, s.start_time, group.timezone).toISOString(), s.sort_order, s.needs_wwcc || 0);
   });
   if (stmts.length) await env.DB.batch(stmts);
   return adminGetEvent(env, group, newId);
@@ -813,11 +822,18 @@ async function adminAddSignup(request, env, ctx, group) {
   if (await env.DB.prepare(`SELECT 1 FROM signups WHERE slot_id = ? AND lower(email) = lower(?)`).bind(slot.id, person.email).first())
     throw httpError(400, 'That email is already signed up for this slot.');
   const item = slot.kind === 'item' ? validateItem({ item_desc: b.item_desc, dietary: b.dietary }, slot.title) : { item_desc: '', dietary: '' };
+  // Organisers may not have the volunteer's check details to hand, so these are optional here
+  let check = { number: '', expiry: '' };
+  if (slot.needs_wwcc && (b.wwcc_number || b.wwcc_expiry)) {
+    const w = readWwcc(b);
+    if (w.error) throw httpError(400, `Working with Children Check: ${w.error}`);
+    check = w;
+  }
   const token = randomToken();
   const cutoff = new Date(Date.now() + group.reminder_hours * 3600e3).toISOString();
-  await env.DB.prepare(`INSERT INTO signups (slot_id, first_name, last_name, email, mobile, comments, answer, item_desc, dietary, manage_token, reminder_sent)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(slot.id, person.first_name, person.last_name, person.email, person.mobile, person.comments,
-    opt(b.answer, 200), item.item_desc, item.dietary, token, slot.start_utc <= cutoff ? 1 : 0).run();
+  await env.DB.prepare(`INSERT INTO signups (slot_id, first_name, last_name, email, mobile, comments, answer, item_desc, dietary, manage_token, reminder_sent, wwcc_number, wwcc_expiry)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(slot.id, person.first_name, person.last_name, person.email, person.mobile, person.comments,
+    opt(b.answer, 200), item.item_desc, item.dietary, token, slot.start_utc <= cutoff ? 1 : 0, check.number, check.expiry).run();
   if (b.send_email) { await queueConfirmation(env, token); ctx.waitUntil(processQueue(env)); }
   return adminGetEvent(env, group, slot.event_id);
 }
@@ -1112,6 +1128,17 @@ function validateItem(info, title) {
   const codes = (Array.isArray(info?.dietary) ? info.dietary : String(info?.dietary || '').split(',')).map(c => String(c).trim()).filter(c => DIETARY[c]);
   return { item_desc, dietary: [...new Set(codes)].join(',') };
 }
+/** Working with Children Check: number (letters, digits, spaces, dashes) and an expiry date that hasn't passed */
+function readWwcc(b) {
+  const number = String(b.wwcc_number || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  const expiry = String(b.wwcc_expiry || '').trim();
+  if (!number) return { error: 'please enter your check number.' };
+  if (!/^[A-Z0-9][A-Z0-9 \-\/]{4,24}$/.test(number)) return { error: 'that check number does not look right.' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return { error: 'please enter the expiry date.' };
+  if (expiry < new Date().toISOString().slice(0, 10)) return { error: 'that check has expired.' };
+  return { number, expiry };
+}
+
 function dietaryList(codes) { return String(codes || '').split(',').filter(c => DIETARY[c]).map(c => DIETARY[c]); }
 function req(v, label, max) {
   const s = String(v ?? '').trim();

@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS slots (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   event_id     INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   kind         TEXT NOT NULL DEFAULT 'shift',     -- shift | item
+  needs_wwcc   INTEGER NOT NULL DEFAULT 0,        -- 1 = volunteers must give a Working with Children Check
   title        TEXT NOT NULL,
   details      TEXT NOT NULL DEFAULT '',
   date         TEXT NOT NULL,
@@ -101,6 +102,8 @@ CREATE TABLE IF NOT EXISTS signups (
   answer        TEXT NOT NULL DEFAULT '',          -- answer to the group's extra question
   item_desc     TEXT NOT NULL DEFAULT '',
   dietary       TEXT NOT NULL DEFAULT '',
+  wwcc_number   TEXT NOT NULL DEFAULT '',          -- Working with Children Check (only for slots that need it)
+  wwcc_expiry   TEXT NOT NULL DEFAULT '',
   manage_token  TEXT NOT NULL,
   reminder_sent INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))

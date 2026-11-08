@@ -38,6 +38,14 @@
         <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required>
         <label for="mobile">Mobile</label>
         <input id="mobile" name="mobile" type="tel" autocomplete="tel" inputmode="tel" placeholder="0412 345 678" required>
+        <div id="wwcc-box" class="hidden item-block" style="margin-top:16px">
+          <label style="margin-top:10px">Working with Children Check</label>
+          <p class="small muted" style="margin:0 0 4px">Needed for some of the slots you picked. For example a NSW WWCC, Queensland Blue Card or NT Ochre Card. Only the organisers see this.</p>
+          <div class="row">
+            <div><label for="wwcc_number">Check number</label><input id="wwcc_number" name="wwcc_number" type="text" autocapitalize="characters" autocomplete="off" maxlength="25"></div>
+            <div><label for="wwcc_expiry">Expiry date</label><input id="wwcc_expiry" name="wwcc_expiry" type="date"></div>
+          </div>
+        </div>
         <div id="question-box" class="hidden"><label for="answer" id="question-label"></label><input id="answer" name="answer" type="text" maxlength="200"></div>
         <label for="comments">Comments <span class="opt">(optional)</span></label>
         <textarea id="comments" name="comments" placeholder="Anything the organiser should know?"></textarea>
@@ -113,6 +121,7 @@
             <div class="time">${fmtTime(s.start_time)} to ${fmtTime(s.end_time)}</div>
             <div class="title">${esc(s.title)}</div>
             ${s.details ? `<div class="details">${nl2br(s.details)}</div>` : ''}
+            ${s.needs_wwcc ? '<div style="margin-top:6px"><span class="badge draft">Working with Children Check needed</span></div>' : ''}
             <div class="fill">${status}</div>
             <div class="bar"><i style="width:${Math.min(100, (s.filled / s.capacity) * 100)}%"></i></div>
             ${s.names.length ? `<div class="names">${s.names.map(n => `<span>${esc(n)}</span>`).join('')}</div>` : ''}
@@ -175,6 +184,8 @@
           ${s.entries && s.entries.length ? `<div class="small muted" style="margin-top:4px">Already coming: ${s.entries.map(e => esc(e.item)).join(', ')}</div>` : ''}
           <div class="diet-choices">${DIETARY.map(([code, label]) => `<label class="chip"><input type="checkbox" value="${code}" ${prev[s.id]?.diet.includes(code) ? 'checked' : ''}> ${label}</label>`).join('')}</div>
         </div>`).join('');
+      const needsCheck = pickedShifts.some(s => s.needs_wwcc);
+      $('#wwcc-box').classList.toggle('hidden', !needsCheck);
       if (group.question_label) {
         $('#question-box').classList.remove('hidden');
         $('#question-label').innerHTML = esc(group.question_label) + (group.question_required ? '' : ' <span class="opt">(optional)</span>');
@@ -203,8 +214,12 @@
       const data = Object.fromEntries(new FormData(f));
       const missing = ['first_name', 'last_name', 'email', 'mobile'].filter(k => !String(data[k] || '').trim());
       if (group.question_label && group.question_required && !String(data.answer || '').trim()) missing.push('answer');
+      const needsCheck = event.slots.some(s => selected.has(s.id) && s.needs_wwcc);
+      if (needsCheck && !String(data.wwcc_number || '').trim()) missing.push('wwcc_number');
+      if (needsCheck && !data.wwcc_expiry) missing.push('wwcc_expiry');
+      if (!needsCheck) { delete data.wwcc_number; delete data.wwcc_expiry; }
       if (missing.length) {
-        $('#form-error').innerHTML = `<div class="error">Please fill in ${missing.map(k => k === 'answer' ? `"${esc(group.question_label)}"` : 'your ' + k.replace('_', ' ')).join(', ')}.</div>`;
+        $('#form-error').innerHTML = `<div class="error">Please fill in ${missing.map(k => k === 'answer' ? `"${esc(group.question_label)}"` : k === 'wwcc_number' ? 'your check number' : k === 'wwcc_expiry' ? 'your check expiry date' : 'your ' + k.replace('_', ' ')).join(', ')}.</div>`;
         $('#' + missing[0]).focus();
         return;
       }
@@ -247,6 +262,7 @@
           <a class="btn block secondary" href="/manage${esc(new URL(res.manage_url).search)}">View my sign-up</a>
           <button class="btn block" style="margin-top:10px" onclick="closeSheet()">Done</button>`;
         $('#comments').value = '';
+        $('#wwcc_number').value = ''; $('#wwcc_expiry').value = '';
         $('#item-fields').innerHTML = '';
         selected.clear();
         load();
