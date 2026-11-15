@@ -145,14 +145,14 @@
         <span class="spacer"></span>
         <button class="btn danger small" id="del">Delete event</button>
       </div>` : ''}
-      ${saved ? `<div class="tabs">
+      ${saved ? `<div class="tabs sub">
         <button data-tab="setup" class="${tab === 'setup' ? 'active' : ''}">Details &amp; slots</button>
         <button data-tab="volunteers" class="${tab === 'volunteers' ? 'active' : ''}">Volunteers (${filled}/${cap})</button>
       </div>` : '<div style="height:12px"></div>'}
       <div id="tab-body"></div>`;
     $('#back').onclick = e => { e.preventDefault(); go(''); };
     bindNav();
-    $$('.tabs button').forEach(b => b.onclick = () => {
+    $$('[data-tab]').forEach(b => b.onclick = () => {
       if (dirty && !window.confirm('You have unsaved changes. Switch tabs without saving?')) return;
       dirty = false;
       history.replaceState(null, '', '#event/' + ev.id + (b.dataset.tab === 'volunteers' ? '/volunteers' : ''));

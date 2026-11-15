@@ -218,3 +218,7 @@ table.list td.actions { white-space: nowrap; text-align: right; }
 #site-header .wrapline .brand { margin: 0; max-width: none; min-width: 0; }
 #site-header .wrapline .brand span { overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 520px) { #site-header .nav a { margin-left: 10px; font-size: 14px; } #site-header .wrapline { flex-wrap: wrap; } }
+/* Tabs inside one event: pill style so they read as a level below the group tabs */
+.tabs.sub { border-bottom: none; gap: 8px; }
+.tabs.sub button { border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; font-size: 15px; }
+.tabs.sub button.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
