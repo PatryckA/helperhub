@@ -222,3 +222,16 @@ table.list td.actions { white-space: nowrap; text-align: right; }
 .tabs.sub { border-bottom: none; gap: 8px; }
 .tabs.sub button { border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; font-size: 15px; }
 .tabs.sub button.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+/* WhatsApp share button */
+.btn.wa { background: #1f8a4c; border-color: #1f8a4c; color: #fff; }
+/* "More" dropdown on the event page */
+.menu-wrap { position: relative; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 6px; min-width: 220px; z-index: 30; }
+.menu > button, .menu > a { display: block; width: 100%; text-align: left; font: inherit; font-size: 15px; background: none; border: none; padding: 10px 12px; border-radius: 8px; color: var(--ink, inherit); text-decoration: none; cursor: pointer; }
+.menu > button:hover, .menu > a:hover { background: #f2f4f6; }
+.menu > .bad { color: var(--bad); }
+/* Radio cards in the share dialog */
+.choice { display: grid; gap: 8px; margin-bottom: 6px; }
+.choice-item { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; font-weight: 400; margin: 0; }
+.choice-item input { width: 18px; height: 18px; margin-top: 2px; flex: none; }
+.choice-item:has(input:checked) { border-color: var(--accent); background: #f5faf9; }

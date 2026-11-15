@@ -7,7 +7,7 @@ Free, ad-free volunteer sign-ups for schools, clubs and community groups, at **h
 - Organisers log in with an emailed link (no passwords), and a group can have several organisers.
 - Things to bring can be anything (food, raffle prizes, gazebos). Volunteers can add optional details; items marked "This is food" also ask for dietary info.
 - Unfilled spot alerts: if spots are still empty, the event contact (and any organisers they pick) get an email at 9am, by default 3 days before the event, with up to 3 dates per event. The email has a "Share on WhatsApp" button that opens WhatsApp with a ready-made message and the sign-up link. The same button is on each event's organiser page. The message lists open spots only, never volunteers' names.
-- "Who's doing what" updates: by default 1 day before the event (up to 3 dates, changeable), organisers get an email listing who signed up for each slot and item, with a "Share on WhatsApp" button. This message uses first name and last initial only (as on the public page), plus what people are bringing. A "Share who's doing what" button on the event's organiser page does the same any time.
+- "Who's doing what" updates: by default 1 day before the event (up to 3 dates, changeable), organisers get an email listing who signed up for each slot and item, with a "Share on WhatsApp" button. This message uses first name and last initial only (as on the public page), plus what people are bringing. Organisers can also share any time from the event page: "Share on WhatsApp" offers three editable messages (ask for helpers, fill the gaps, who's doing what).
 - The owner (you) has a dashboard at `helperhub.au/owner` to see every group, change email limits and suspend misuse.
 
 ## How it fits together

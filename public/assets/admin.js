@@ -9,6 +9,8 @@
   let dirty = false;
   let tab = 'setup';
   let organisers = null; // cached list for the alert recipient picker
+  // close the event's "More" menu when tapping anywhere else
+  document.addEventListener('click', e => { const m = $('#more-menu'); if (m && !e.target.closest('.menu-wrap')) m.classList.add('hidden'); });
 
   const call = (path, opts = {}) => api(path, { ...opts, auth: true }).catch(err => {
     if (err.status === 401) { session.clear(); location.replace('/login'); }
@@ -135,15 +137,18 @@
         ${saved ? (ev.published ? '<span class="badge">Live</span>' : '<span class="badge draft">Draft</span>') : ''}
       </div>
       ${saved ? `<div class="toolbar" style="margin-top:12px">
-        <button class="btn secondary small" id="copylink">Copy volunteer link</button>
-        <button class="btn secondary small" id="wa">Share gaps on WhatsApp</button>
-        <button class="btn secondary small" id="wa-roster">Share who's doing what</button>
-        <a class="btn secondary small" href="/${esc(slug)}/event/${ev.id}" target="_blank" rel="noopener">Preview</a>
-        <button class="btn secondary small" id="dup">Duplicate event</button>
-        <button class="btn secondary small" id="print">Print sign-in sheet</button>
+        <button class="btn small wa" id="share">Share on WhatsApp</button>
         <button class="btn secondary small" id="mail">Email volunteers</button>
-        <span class="spacer"></span>
-        <button class="btn danger small" id="del">Delete event</button>
+        <button class="btn secondary small" id="print">Print sign-in sheet</button>
+        <div class="menu-wrap">
+          <button class="btn secondary small" id="more" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
+          <div class="menu hidden" id="more-menu" role="menu">
+            <button role="menuitem" id="copylink">Copy volunteer link</button>
+            <a role="menuitem" href="/${esc(slug)}/event/${ev.id}" target="_blank" rel="noopener">Preview volunteer page</a>
+            <button role="menuitem" id="dup">Duplicate event</button>
+            <button role="menuitem" id="del" class="bad">Delete event</button>
+          </div>
+        </div>
       </div>` : ''}
       ${saved ? `<div class="tabs sub">
         <button data-tab="setup" class="${tab === 'setup' ? 'active' : ''}">Details &amp; slots</button>
@@ -159,9 +164,12 @@
       tab = b.dataset.tab; showEditor(current);
     });
     if (saved) {
+      const menu = $('#more-menu'), more = $('#more');
+      const closeMenu = () => { menu.classList.add('hidden'); more.setAttribute('aria-expanded', 'false'); };
+      more.onclick = e => { e.stopPropagation(); const open = menu.classList.toggle('hidden'); more.setAttribute('aria-expanded', String(!open)); };
+      $$('#more-menu [role=menuitem]').forEach(i => i.addEventListener('click', closeMenu));
+      $('#share').onclick = () => shareModal(ev);
       $('#copylink').onclick = () => copyLink(ev.id);
-      $('#wa').onclick = () => shareGaps(ev);
-      $('#wa-roster').onclick = () => shareRoster(ev);
       $('#dup').onclick = () => duplicateModal(ev);
       $('#print').onclick = () => printSignIn(ev);
       $('#mail').onclick = () => emailModal(ev);
@@ -277,7 +285,7 @@
     };
     box.innerHTML = `
       <h2 style="margin:0 0 4px">Organiser updates</h2>
-      <p class="small muted" style="margin:0">Sent to ${contact ? esc(contact) : 'every organiser'}. Use the buttons at the top of the event to share any time.</p>
+      <p class="small muted" style="margin:0">Sent to ${contact ? esc(contact) : 'every organiser'}. Use Share on WhatsApp at the top of the event to share any time.</p>
       ${block('gap')}
       ${block('roster')}
       <div style="margin-top:16px">
@@ -303,34 +311,91 @@
 
   const tShort = x => { let [h, m] = x.split(':').map(Number); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return m ? `${h}:${String(m).padStart(2, '0')}${ap}` : `${h}${ap}`; };
   const shortName = g => `${g.first_name} ${g.last_name ? g.last_name[0].toUpperCase() + '.' : ''}`.trim();
-  const openWhatsApp = text => window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener');
   const upcoming = ev => { const today = new Date().toISOString().slice(0, 10); return ev.slots.filter(s => (s.date || '') >= today); };
 
-  function shareGaps(ev) {
-    const open = upcoming(ev).filter(s => s.capacity > (s.signups?.length || 0));
-    if (!open.length) { toast('All spots are filled. Nice work!'); return; }
-    const lines = open.map(s => {
-      const left = s.capacity - (s.signups?.length || 0);
-      return s.kind === 'item' ? `• ${s.title} (to bring): ${left} more` : `• ${s.title}, ${niceDate(s.date)} ${tShort(s.start_time)} to ${tShort(s.end_time)}: ${left} more`;
-    });
-    openWhatsApp(`We still need helpers for ${ev.title}!\n\n${lines.join('\n')}\n\nCan you help? Sign up here: ${location.origin}/${slug}/event/${ev.id}`);
-  }
+  const eventUrl = ev => `${location.origin}/${slug}/event/${ev.id}`;
+  const slotLine = (s, n) => s.kind === 'item' ? `• ${s.title} (to bring): ${n}` : `• ${s.title}, ${niceDate(s.date)} ${tShort(s.start_time)} to ${tShort(s.end_time)}: ${n}`;
+  const leftIn = s => s.capacity - (s.signups?.length || 0);
 
-  function shareRoster(ev) {
-    const slots = upcoming(ev);
-    if (!slots.some(s => s.signups?.length)) { toast('Nobody has signed up yet.'); return; }
-    const shifts = slots.filter(s => s.kind !== 'item'), items = slots.filter(s => s.kind === 'item');
-    const who = s => {
-      const names = (s.signups || []).map(g => s.kind === 'item' && g.item_desc ? `${shortName(g)} (${g.item_desc})` : shortName(g));
-      const left = s.capacity - names.length;
-      return [names.join(', '), left > 0 ? `${left} still needed` : ''].filter(Boolean).join('; ');
-    };
-    const parts = [`Here's who's helping at ${ev.title}. Thank you!`];
-    if (shifts.length) parts.push(shifts.map(s => `*${s.title}*, ${niceDate(s.date)} ${tShort(s.start_time)} to ${tShort(s.end_time)}\n${who(s)}`).join('\n\n'));
-    if (items.length) parts.push(`*Things to bring* (drop off by ${tShort(ev.dropoff_time)} ${niceDate(ev.dropoff_date)}${ev.dropoff_note ? ', ' + ev.dropoff_note : ''})\n` + items.map(s => `• ${s.title}: ${who(s)}`).join('\n'));
-    const open = slots.some(s => s.capacity > (s.signups?.length || 0));
-    parts.push(open ? `Spots still free: ${location.origin}/${slug}/event/${ev.id}` : 'All spots are filled. See you there!');
-    openWhatsApp(parts.join('\n\n'));
+  // Each returns the ready-made message, or { empty: 'reason' } when there's nothing to say
+  const SHARE = {
+    ask: {
+      label: 'Ask for helpers', hint: 'Invite people to sign up. Lists everything still needed.',
+      text(ev) {
+        const open = upcoming(ev).filter(s => leftIn(s) > 0);
+        if (!open.length) return { empty: 'Every spot is already filled.' };
+        const dates = [...new Set(upcoming(ev).map(s => s.kind === 'item' ? ev.dropoff_date : s.date).filter(Boolean))].sort();
+        const when = dates.length ? niceDate(dates[0]) + (dates.length > 1 ? ` to ${niceDate(dates[dates.length - 1])}` : '') : '';
+        const intro = [`Can you help at ${ev.title}?`, [when, ev.location].filter(Boolean).join(', ')].filter(Boolean).join('\n');
+        const need = open.map(s => slotLine(s, `${leftIn(s)} ${s.kind === 'item' ? 'needed' : leftIn(s) === 1 ? 'person' : 'people'}`));
+        return `${intro}\n\nWe need:\n${need.join('\n')}\n\nIt only takes a minute to sign up: ${eventUrl(ev)}\nThank you!`;
+      },
+    },
+    gaps: {
+      label: 'Fill the gaps', hint: 'A follow-up for spots that are still empty.',
+      text(ev) {
+        const open = upcoming(ev).filter(s => leftIn(s) > 0);
+        if (!open.length) return { empty: 'All spots are filled. Nice work!' };
+        return `We still need helpers for ${ev.title}!\n\n${open.map(s => slotLine(s, `${leftIn(s)} more`)).join('\n')}\n\nCan you help? Sign up here: ${eventUrl(ev)}`;
+      },
+    },
+    roster: {
+      label: "Who's doing what", hint: 'Thank everyone and show who signed up (first name and last initial).',
+      text(ev) {
+        const slots = upcoming(ev);
+        if (!slots.some(s => s.signups?.length)) return { empty: 'Nobody has signed up yet.' };
+        const shifts = slots.filter(s => s.kind !== 'item'), items = slots.filter(s => s.kind === 'item');
+        const who = s => {
+          const names = (s.signups || []).map(g => s.kind === 'item' && g.item_desc ? `${shortName(g)} (${g.item_desc})` : shortName(g));
+          return [names.join(', '), leftIn(s) > 0 ? `${leftIn(s)} still needed` : ''].filter(Boolean).join('; ');
+        };
+        const parts = [`Here's who's helping at ${ev.title}. Thank you!`];
+        if (shifts.length) parts.push(shifts.map(s => `*${s.title}*, ${niceDate(s.date)} ${tShort(s.start_time)} to ${tShort(s.end_time)}\n${who(s)}`).join('\n\n'));
+        if (items.length) parts.push(`*Things to bring* (drop off by ${tShort(ev.dropoff_time)} ${niceDate(ev.dropoff_date)}${ev.dropoff_note ? ', ' + ev.dropoff_note : ''})\n` + items.map(s => `• ${s.title}: ${who(s)}`).join('\n'));
+        parts.push(slots.some(s => leftIn(s) > 0) ? `Spots still free: ${eventUrl(ev)}` : 'All spots are filled. See you there!');
+        return parts.join('\n\n');
+      },
+    },
+  };
+
+  function shareModal(ev) {
+    const filled = ev.slots.reduce((n, s) => n + (s.signups?.length || 0), 0);
+    let kind = filled ? 'gaps' : 'ask';
+    if (!ev.published) toast('This event is a draft. Tick "Live" and save so people can sign up.', 'bad');
+    modal(`
+      <h2>Share on WhatsApp</h2>
+      <div class="choice" role="radiogroup">${Object.entries(SHARE).map(([k, v]) => `
+        <label class="choice-item"><input type="radio" name="share-kind" value="${k}" ${k === kind ? 'checked' : ''}>
+          <span><strong>${v.label}</strong><br><span class="small muted">${v.hint}</span></span></label>`).join('')}
+      </div>
+      <label for="share-text">Message <span class="opt">(you can edit it)</span></label>
+      <textarea id="share-text" style="min-height:190px"></textarea>
+      <div id="share-empty"></div>
+      <div class="actions" style="flex-wrap:wrap">
+        <button class="btn secondary" id="share-copy">Copy text</button>
+        <button class="btn wa" id="share-go">Open WhatsApp</button>
+      </div>
+      <p class="small muted" style="margin-bottom:0">WhatsApp opens with this message. Pick the group and press send. <a href="#" id="share-link">Copy the sign-up link only</a></p>`,
+    (m, close) => {
+      const fill = () => {
+        const t = SHARE[kind].text(ev);
+        $('#share-text', m).value = typeof t === 'string' ? t : '';
+        $('#share-empty', m).innerHTML = typeof t === 'string' ? '' : `<div class="notice">${esc(t.empty)}</div>`;
+      };
+      $$('[name=share-kind]', m).forEach(r => r.onchange = () => { kind = r.value; fill(); });
+      fill();
+      $('#share-go', m).onclick = () => {
+        const text = $('#share-text', m).value.trim();
+        if (!text) return;
+        window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener');
+        close();
+      };
+      $('#share-copy', m).onclick = () => {
+        const text = $('#share-text', m).value;
+        if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Message copied.'), () => {});
+      };
+      $('#share-link', m).onclick = e => { e.preventDefault(); copyLink(ev.id); };
+    });
   }
 
   function markDirty() { dirty = true; const n = $('#dirty-note'); if (n) n.textContent = 'Unsaved changes'; }
