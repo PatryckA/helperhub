@@ -73,6 +73,8 @@ CREATE TABLE IF NOT EXISTS events (
   gap_alerts   TEXT,                               -- unfilled-spot alert dates, comma list; NULL = default (3 days before)
   gap_alert_emails TEXT NOT NULL DEFAULT '',       -- extra organisers who get the alerts, comma list
   gap_alerts_sent TEXT NOT NULL DEFAULT '',        -- alert dates already sent
+  roster_alerts TEXT,                              -- "who's doing what" email dates; NULL = default (1 day before)
+  roster_alerts_sent TEXT NOT NULL DEFAULT '',
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_events_group ON events(group_id);
