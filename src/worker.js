@@ -442,7 +442,7 @@ async function getPublicEvent(env, group, id) {
     FROM events WHERE id = ? AND group_id = ? AND published = 1`).bind(id, group.id).first();
   if (!ev) throw httpError(404, 'This event could not be found. It may have been removed.');
   const { results: slots } = await env.DB.prepare(
-    `SELECT id, kind, title, details, date, start_time, end_time, capacity, start_utc, needs_wwcc FROM slots WHERE event_id = ? ORDER BY date, start_time, sort_order, id`
+    `SELECT id, kind, title, details, date, start_time, end_time, capacity, start_utc, needs_wwcc, is_food FROM slots WHERE event_id = ? ORDER BY date, start_time, sort_order, id`
   ).bind(id).all();
   const { results: people } = await env.DB.prepare(
     `SELECT g.slot_id, g.first_name, g.last_name, g.item_desc, g.dietary FROM signups g JOIN slots s ON s.id = g.slot_id WHERE s.event_id = ? ORDER BY g.id`
@@ -459,6 +459,7 @@ async function getPublicEvent(env, group, id) {
       names: list.map(p => displayName(p.first_name, p.last_name)),
       entries: isItem ? list.map(p => ({ name: displayName(p.first_name, p.last_name), item: p.item_desc, dietary: dietaryList(p.dietary) })) : undefined,
       needs_wwcc: !isItem && !!s.needs_wwcc,
+      is_food: isItem && !!s.is_food,
       closed: s.start_utc <= now,
     };
   });
@@ -494,7 +495,7 @@ async function createSignups(request, env, ctx, group) {
     if (slot.start_utc <= now.toISOString()) { problems.push({ slot_id: slotId, reason: isItem ? `${label} is closed.` : `${label} has already started.` }); continue; }
     let item = { item_desc: '', dietary: '' };
     if (isItem) {
-      try { item = validateItem(itemInfo[slotId] || itemInfo[String(slotId)], slot.title); }
+      try { item = validateItem(itemInfo[slotId] || itemInfo[String(slotId)], slot.title, slot.is_food); }
       catch (err) { problems.push({ slot_id: slotId, reason: err.message }); continue; }
     }
     let check = { number: '', expiry: '' };
@@ -714,6 +715,7 @@ async function adminSaveEvent(request, env, group, id) {
       end_time: isItem ? ev.dropoff_time : s.end_time,
       capacity: Math.max(1, Math.min(500, parseInt(s.capacity, 10) || 1)), sort_order: i,
       needs_wwcc: !isItem && (s.needs_wwcc === true || s.needs_wwcc === 1 || s.needs_wwcc === '1') ? 1 : 0,
+      is_food: isItem && (s.is_food === undefined || s.is_food === true || s.is_food === 1 || s.is_food === '1') ? 1 : 0,
     };
     if (!isItem) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(slot.date || '')) throw httpError(400, `Slot ${i + 1} needs a date.`);
@@ -758,10 +760,10 @@ async function adminSaveEvent(request, env, group, id) {
     }
   }
   for (const s of slots) {
-    if (s.id) stmts.push(env.DB.prepare(`UPDATE slots SET kind=?, title=?, details=?, date=?, start_time=?, end_time=?, capacity=?, start_utc=?, sort_order=?, needs_wwcc=? WHERE id=? AND event_id=?`)
-      .bind(s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order, s.needs_wwcc, s.id, id));
-    else stmts.push(env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order, needs_wwcc) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(id, s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order, s.needs_wwcc));
+    if (s.id) stmts.push(env.DB.prepare(`UPDATE slots SET kind=?, title=?, details=?, date=?, start_time=?, end_time=?, capacity=?, start_utc=?, sort_order=?, needs_wwcc=?, is_food=? WHERE id=? AND event_id=?`)
+      .bind(s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order, s.needs_wwcc, s.is_food, s.id, id));
+    else stmts.push(env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order, needs_wwcc, is_food) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(id, s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order, s.needs_wwcc, s.is_food));
   }
   if (stmts.length) await env.DB.batch(stmts);
   return adminGetEvent(env, group, id);
@@ -794,8 +796,8 @@ async function adminDuplicate(request, env, group, id) {
   const newId = r.meta.last_row_id;
   const stmts = slots.map(s => {
     const date = addDays(s.date, shift);
-    return env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order, needs_wwcc) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(newId, s.kind, s.title, s.details, date, s.start_time, s.end_time, s.capacity, localToUtc(date, s.start_time, group.timezone).toISOString(), s.sort_order, s.needs_wwcc || 0);
+    return env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order, needs_wwcc, is_food) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(newId, s.kind, s.title, s.details, date, s.start_time, s.end_time, s.capacity, localToUtc(date, s.start_time, group.timezone).toISOString(), s.sort_order, s.needs_wwcc || 0, s.is_food ?? 1);
   });
   if (stmts.length) await env.DB.batch(stmts);
   return adminGetEvent(env, group, newId);
@@ -829,7 +831,7 @@ async function adminAddSignup(request, env, ctx, group) {
   if (!slot) throw httpError(404, 'Slot not found.');
   if (await env.DB.prepare(`SELECT 1 FROM signups WHERE slot_id = ? AND lower(email) = lower(?)`).bind(slot.id, person.email).first())
     throw httpError(400, 'That email is already signed up for this slot.');
-  const item = slot.kind === 'item' ? validateItem({ item_desc: b.item_desc, dietary: b.dietary }, slot.title) : { item_desc: '', dietary: '' };
+  const item = slot.kind === 'item' ? validateItem({ item_desc: b.item_desc, dietary: b.dietary }, slot.title, slot.is_food) : { item_desc: '', dietary: '' };
   // Organisers may not have the volunteer's check details to hand, so these are optional here
   let check = { number: '', expiry: '' };
   if (slot.needs_wwcc && (b.wwcc_number || b.wwcc_expiry)) {
@@ -1234,7 +1236,7 @@ function button(href, label, color = '#2f7d6d') {
 function slotTable(rows) {
   const box = inner => `<div style="border-left:4px solid #ccc;padding:8px 12px;margin:10px 0;background:#f6f8fa;border-radius:4px">${inner}</div>`;
   return rows.map(r => box(r.kind === 'item' ? `
-      <div style="font-weight:bold">Bringing: ${esc(r.item_desc)} <span style="font-weight:normal;color:#555">(${esc(r.title)})</span></div>
+      <div style="font-weight:bold">Bringing: ${r.item_desc ? `${esc(r.item_desc)} <span style="font-weight:normal;color:#555">(${esc(r.title)})</span>` : esc(r.title)}</div>
       ${dietaryList(r.dietary).length ? `<div style="color:#555;font-size:14px">${esc(dietaryList(r.dietary).join(', '))}</div>` : ''}
       <div>Drop off by ${esc(fmtTime(r.start_time))}, ${esc(fmtDate(r.date))}${r.dropoff_note ? ', ' + esc(r.dropoff_note) : ''}</div>
       <div style="color:#555">${esc(r.event_title)}${r.location ? ' &middot; ' + esc(r.location) : ''}</div>` : `
@@ -1281,10 +1283,11 @@ function validatePerson(b) {
   if (/^04\d{8}$/.test(mobile)) mobile = `${mobile.slice(0, 4)} ${mobile.slice(4, 7)} ${mobile.slice(7)}`;
   return { first_name, last_name, email, mobile, comments: opt(b.comments, 1000) };
 }
-function validateItem(info, title) {
+/** Item details are optional; dietary info is kept only for food items */
+function validateItem(info, title, isFood = 1) {
   const item_desc = String(info?.item_desc ?? '').trim();
-  if (!item_desc) throw httpError(400, `Please say what you'll bring for "${title}".`);
   if (item_desc.length > 120) throw httpError(400, `The description for "${title}" is too long.`);
+  if (!isFood) return { item_desc, dietary: '' };
   const codes = (Array.isArray(info?.dietary) ? info.dietary : String(info?.dietary || '').split(',')).map(c => String(c).trim()).filter(c => DIETARY[c]);
   return { item_desc, dietary: [...new Set(codes)].join(',') };
 }

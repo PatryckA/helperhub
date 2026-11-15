@@ -29,7 +29,7 @@
             <div class="card">
               <div class="muted small">${esc(s.event_title)}${s.location ? ' · ' + esc(s.location) : ''}</div>
               ${s.kind === 'item' ? `
-              <div style="font-weight:600;font-size:17px">Bringing ${esc(s.item_desc)} <span class="muted" style="font-weight:400">(${esc(s.title)})</span></div>
+              <div style="font-weight:600;font-size:17px">Bringing ${s.item_desc ? `${esc(s.item_desc)} <span class="muted" style="font-weight:400">(${esc(s.title)})</span>` : esc(s.title)}</div>
               ${s.dietary.length ? `<div>${s.dietary.map(d => `<span class="diet" style="margin:0 4px 0 0">${esc(d)}</span>`).join('')}</div>` : ''}
               <div>Drop off by ${fmtTime(s.start_time)}, ${esc(fmtDate(s.date))}${s.dropoff_note ? ' · ' + esc(s.dropoff_note) : ''}</div>` : `
               <div class="time" style="font-weight:700">${esc(fmtDate(s.date))}, ${fmtTime(s.start_time)} to ${fmtTime(s.end_time)}</div>

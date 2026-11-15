@@ -203,7 +203,7 @@
         <h2 style="margin:0">Things to bring</h2><span class="spacer"></span>
         <button class="btn secondary small" id="additem">+ Add item</button>
       </div>
-      <p class="small muted">For bring-a-plate events, e.g. "Main dish" needing 6 people. Parents say what they'll bring and tick any dietary info.</p>
+      <p class="small muted">Anything people can bring, e.g. "Main dish" for 6 people or "Raffle prizes". Volunteers can add details. Tick "This is food" to also ask for dietary info.</p>
       <div id="dropoff" class="card hidden" style="margin-bottom:12px">
         <div class="row">
           <div><label for="f-dd" style="margin-top:0">Drop-off date</label><input id="f-dd" data-k="dropoff_date" type="date" value="${esc(ev.dropoff_date || '')}"></div>
@@ -372,6 +372,7 @@
           <div><label>How many</label><input type="number" data-k="capacity" min="${Math.max(1, n)}" max="500" value="${esc(s.capacity)}"></div>
         </div>
         <textarea data-k="details" placeholder="Details (optional), e.g. serves 8, please bring in a disposable dish">${esc(s.details)}</textarea>
+        <label class="check small" style="margin:8px 0 0"><input type="checkbox" data-food ${s.is_food ? 'checked' : ''}> This is food (ask for dietary info)</label>
         ${foot(s, n)}
       </div>`;
     }).join('');
@@ -385,6 +386,8 @@
       }));
       const w = $('[data-wwcc]', el);
       if (w) w.addEventListener('change', () => { s.needs_wwcc = w.checked ? 1 : 0; markDirty(); });
+      const f = $('[data-food]', el);
+      if (f) f.addEventListener('change', () => { s.is_food = f.checked ? 1 : 0; markDirty(); });
       $('[data-act=copy]', el).onclick = () => {
         current.slots.splice(+el.dataset.i + 1, 0, { ...s, id: undefined, signups: [] });
         markDirty(); renderSlots();
@@ -401,7 +404,7 @@
 
   function addItem() {
     dropBlankStarter();
-    current.slots.push({ kind: 'item', title: '', details: '', capacity: 4, signups: [] });
+    current.slots.push({ kind: 'item', title: '', details: '', capacity: 4, is_food: 0, signups: [] });
     markDirty(); renderSlots();
     const els = $$('#items .slot-edit'); const last = els[els.length - 1];
     last.scrollIntoView({ behavior: 'smooth', block: 'center' }); $('input', last).focus();
@@ -533,10 +536,10 @@
     modal(`
       <h2>Add a volunteer</h2>
       <label>Slot</label>
-      <select id="v-slot">${current.slots.map(s => `<option value="${s.id}" data-kind="${s.kind || 'shift'}" data-wwcc="${s.needs_wwcc ? 1 : 0}">${s.kind === 'item' ? 'Bring: ' + esc(s.title) : `${esc(fmtDateShort(s.date))} ${fmtTime(s.start_time)}, ${esc(s.title)}`} (${s.signups.length}/${s.capacity})</option>`).join('')}</select>
+      <select id="v-slot">${current.slots.map(s => `<option value="${s.id}" data-kind="${s.kind || 'shift'}" data-food="${s.is_food ? 1 : 0}" data-wwcc="${s.needs_wwcc ? 1 : 0}">${s.kind === 'item' ? 'Bring: ' + esc(s.title) : `${esc(fmtDateShort(s.date))} ${fmtTime(s.start_time)}, ${esc(s.title)}`} (${s.signups.length}/${s.capacity})</option>`).join('')}</select>
       <div id="v-item" class="hidden">
-        <label>Bringing</label><input type="text" id="v-desc" placeholder="e.g. Chicken curry">
-        <div class="diet-choices">${Object.entries(DIET).map(([c, l]) => `<label class="chip"><input type="checkbox" value="${c}"> ${l}</label>`).join('')}</div>
+        <label>Bringing <span class="opt">(optional)</span></label><input type="text" id="v-desc" placeholder="Details, if any">
+        <div class="diet-choices" id="v-diet">${Object.entries(DIET).map(([c, l]) => `<label class="chip"><input type="checkbox" value="${c}"> ${l}</label>`).join('')}</div>
       </div>
       <div class="row"><div><label>First name</label><input type="text" id="v-first"></div><div><label>Last name</label><input type="text" id="v-last"></div></div>
       <label>Email</label><input type="email" id="v-email">
@@ -554,6 +557,7 @@
       const syncKind = () => {
         const o = $('#v-slot', m).selectedOptions[0];
         $('#v-item', m).classList.toggle('hidden', o?.dataset.kind !== 'item');
+        $('#v-diet', m).classList.toggle('hidden', o?.dataset.food !== '1');
         $('#v-wwcc', m).classList.toggle('hidden', o?.dataset.wwcc !== '1');
       };
       $('#v-slot', m).onchange = syncKind; syncKind();
@@ -562,7 +566,7 @@
           const { event } = await call(A + '/signups', { method: 'POST', body: {
             slot_id: +$('#v-slot', m).value, first_name: $('#v-first', m).value, last_name: $('#v-last', m).value,
             email: $('#v-email', m).value, mobile: $('#v-mobile', m).value, comments: $('#v-comments', m).value, send_email: $('#v-send', m).checked, answer: $('#v-answer', m)?.value || '', wwcc_number: $('#v-wn', m).value, wwcc_expiry: $('#v-we', m).value,
-            item_desc: $('#v-desc', m).value, dietary: $$('#v-item input:checked', m).map(c => c.value) } });
+            item_desc: $('#v-desc', m).value, dietary: $('#v-slot', m).selectedOptions[0]?.dataset.food === '1' ? $$('#v-item input:checked', m).map(c => c.value) : [] } });
           close(); toast('Volunteer added.'); showEditor(event);
         } catch (err) { $('#v-err', m).innerHTML = `<div class="error">${esc(err.message)}</div>`; }
       };
@@ -641,7 +645,7 @@
     const rows = [...people.values()].sort((a, b) => (a.last + ' ' + a.first).localeCompare(b.last + ' ' + b.first, 'en', { sensitivity: 'base' }));
     const dates = [...new Set(ev.slots.map(s => s.date))].sort();
     const describe = ({ s, g }) => s.kind === 'item'
-      ? `Bringing: ${esc(g.item_desc)} <span class="sub">(${esc(s.title)})</span>`
+      ? `Bringing: ${g.item_desc ? `${esc(g.item_desc)} <span class="sub">(${esc(s.title)})</span>` : esc(s.title)}`
       : `${fmtTime(s.start_time)} to ${fmtTime(s.end_time)} <span class="sub">${esc(s.title)}${dates.length > 1 ? ', ' + esc(fmtDateShort(s.date)) : ''}</span>`;
     const logo = group.logo_url ? new URL(group.logo_url, location.href).href : '';
     const q = group.question_label;

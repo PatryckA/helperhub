@@ -150,7 +150,7 @@
             ${s.details ? `<div class="details">${nl2br(s.details)}</div>` : ''}
             <div class="fill">${status}</div>
             <div class="bar"><i style="width:${Math.min(100, (s.filled / s.capacity) * 100)}%"></i></div>
-            ${s.entries && s.entries.length ? `<ul class="bringing">${s.entries.map(e => `<li><strong>${esc(e.item)}</strong> <span class="muted">from ${esc(e.name)}</span>${e.dietary.length ? ` ${e.dietary.map(d => `<span class="diet">${esc(d)}</span>`).join('')}` : ''}</li>`).join('')}</ul>` : ''}
+            ${s.entries && s.entries.length ? `<ul class="bringing">${s.entries.map(e => `<li>${e.item ? `<strong>${esc(e.item)}</strong> <span class="muted">from ${esc(e.name)}</span>` : `<strong>${esc(e.name)}</strong>`}${e.dietary.length ? ` ${e.dietary.map(d => `<span class="diet">${esc(d)}</span>`).join('')}` : ''}</li>`).join('')}</ul>` : ''}
           </div>
         </div>`;
     }
@@ -179,10 +179,10 @@
       $$('#item-fields [data-item]').forEach(b => { prev[b.dataset.item] = { desc: $('input[type=text]', b).value, diet: $$('input[type=checkbox]:checked', b).map(c => c.value) }; });
       $('#item-fields').innerHTML = pickedItems.map(s => `
         <div class="item-block" data-item="${s.id}">
-          <label for="item-${s.id}">What will you bring for <em>${esc(s.title)}</em>?</label>
-          <input id="item-${s.id}" type="text" maxlength="120" placeholder="e.g. Chicken curry" value="${esc(prev[s.id]?.desc || '')}" required>
-          ${s.entries && s.entries.length ? `<div class="small muted" style="margin-top:4px">Already coming: ${s.entries.map(e => esc(e.item)).join(', ')}</div>` : ''}
-          <div class="diet-choices">${DIETARY.map(([code, label]) => `<label class="chip"><input type="checkbox" value="${code}" ${prev[s.id]?.diet.includes(code) ? 'checked' : ''}> ${label}</label>`).join('')}</div>
+          <label for="item-${s.id}">${s.is_food ? 'What will you bring' : 'Any details'} for <em>${esc(s.title)}</em>? <span class="opt">(optional)</span></label>
+          <input id="item-${s.id}" type="text" maxlength="120" placeholder="${s.is_food ? 'e.g. Chicken curry' : 'e.g. size, quantity or type'}" value="${esc(prev[s.id]?.desc || '')}">
+          ${s.entries && s.entries.some(e => e.item) ? `<div class="small muted" style="margin-top:4px">Already coming: ${s.entries.filter(e => e.item).map(e => esc(e.item)).join(', ')}</div>` : ''}
+          ${s.is_food ? `<div class="diet-choices">${DIETARY.map(([code, label]) => `<label class="chip"><input type="checkbox" value="${code}" ${prev[s.id]?.diet.includes(code) ? 'checked' : ''}> ${label}</label>`).join('')}</div>` : ''}
         </div>`).join('');
       const needsCheck = pickedShifts.some(s => s.needs_wwcc);
       $('#wwcc-box').classList.toggle('hidden', !needsCheck);
@@ -227,11 +227,6 @@
       data.items = {};
       for (const b of $$('#item-fields [data-item]')) {
         const desc = $('input[type=text]', b);
-        if (!desc.value.trim()) {
-          $('#form-error').innerHTML = '<div class="error">Please say what you\'ll bring.</div>';
-          desc.focus();
-          return;
-        }
         data.items[b.dataset.item] = { item_desc: desc.value.trim(), dietary: $$('input[type=checkbox]:checked', b).map(c => c.value) };
       }
       const btn = $('#submit');
@@ -248,7 +243,7 @@
         }
         const ok = event.slots.filter(s => res.created.some(c => c.slot_id === s.id));
         const describe = s => s.kind === 'item'
-          ? `<div><strong>Bringing ${esc(data.items[s.id].item_desc)}</strong> (${esc(s.title)})<br>Drop off by ${fmtTime(s.start_time)}, ${esc(fmtDateShort(s.date))}</div>`
+          ? `<div><strong>Bringing ${data.items[s.id].item_desc ? `${esc(data.items[s.id].item_desc)}</strong> (${esc(s.title)})` : `${esc(s.title)}</strong>`}<br>Drop off by ${fmtTime(s.start_time)}, ${esc(fmtDateShort(s.date))}</div>`
           : `<div><strong>${esc(s.title)}</strong><br>${esc(fmtDateShort(s.date))}, ${fmtTime(s.start_time)} to ${fmtTime(s.end_time)}</div>`;
         $('#form-view').classList.add('hidden');
         $('#done-view').classList.remove('hidden');
