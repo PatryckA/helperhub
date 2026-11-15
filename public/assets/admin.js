@@ -11,6 +11,7 @@
   let organisers = null; // cached list for the alert recipient picker
   let teams = null;      // this group's teams (loaded with the group)
   const teamName = id => (teams || []).find(t => t.id === Number(id))?.name || '';
+  const T = () => teamTerms(group); // what this group calls its teams
   const slotName = s => (teamName(s.team_id) ? teamName(s.team_id) + ': ' : '') + s.title;
   // close the event's "More" menu when tapping anywhere else
   document.addEventListener('click', e => { const m = $('#more-menu'); if (m && !e.target.closest('.menu-wrap')) m.classList.add('hidden'); });
@@ -28,7 +29,7 @@
   function groupNav(active) {
     return `<div class="tabs" style="margin-top:16px">
       <button data-nav="" class="${active === 'events' ? 'active' : ''}">Events</button>
-      <button data-nav="teams" class="${active === 'teams' ? 'active' : ''}">Teams</button>
+      <button data-nav="teams" class="${active === 'teams' ? 'active' : ''}">${esc(T().many)}</button>
       <button data-nav="settings" class="${active === 'settings' ? 'active' : ''}">Settings</button>
       <button data-nav="organisers" class="${active === 'organisers' ? 'active' : ''}">Organisers</button>
     </div>`;
@@ -388,8 +389,8 @@
     modal(`
       <h2>Share on WhatsApp</h2>
       ${evTeams.length ? `<label for="share-team" style="margin-top:0">Who is it for?</label>
-      <select id="share-team"><option value="">Everyone (all teams)</option>${evTeams.map(t => `<option value="${t.id}">${esc(t.name)} only</option>`).join('')}</select>
-      <p class="small muted" style="margin:4px 0 10px">Pick a team to share just their jobs in their own chat. The link then shows parents only that team's slots.</p>` : ''}
+      <select id="share-team"><option value="">Everyone (all ${esc(T().many.toLowerCase())})</option>${evTeams.map(t => `<option value="${t.id}">${esc(t.name)} only</option>`).join('')}</select>
+      <p class="small muted" style="margin:4px 0 10px">Pick one to share just their jobs in their own chat. The link then shows only their slots (plus any for everyone).</p>` : ''}
       <div class="choice" role="radiogroup">${Object.entries(SHARE).map(([k, v]) => `
         <label class="choice-item"><input type="radio" name="share-kind" value="${k}" ${k === kind ? 'checked' : ''}>
           <span><strong>${v.label}</strong><br><span class="small muted">${v.hint}</span></span></label>`).join('')}
@@ -495,8 +496,8 @@
 
   function teamSelect(s) {
     if (!teams || !teams.length) return '';
-    return `<div class="team-pick"><label class="small muted">Team</label>
-      <select data-team><option value="">Whole event (no team)</option>${teams.map(t => `<option value="${t.id}" ${Number(s.team_id) === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>`;
+    return `<div class="team-pick"><label class="small muted">${esc(T().one)}</label>
+      <select data-team><option value="">Everyone (whole event)</option>${teams.map(t => `<option value="${t.id}" ${Number(s.team_id) === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>`;
   }
 
   function dropBlankStarter() {
@@ -615,7 +616,7 @@
         <div><label>People per shift</label><input type="number" id="r-cap" min="1" value="${esc(last.capacity || 2)}"></div></div>
       <div class="row"><div><label>From</label><input type="time" id="r-from" value="09:00" step="300"></div>
         <div><label>To</label><input type="time" id="r-to" value="13:00" step="300"></div></div>
-      ${teams && teams.length ? `<label>Team</label><select id="r-team"><option value="">Whole event (no team)</option>${teams.map(t => `<option value="${t.id}" ${Number(last.team_id) === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}
+      ${teams && teams.length ? `<label>${esc(T().one)}</label><select id="r-team"><option value="">Everyone (whole event)</option>${teams.map(t => `<option value="${t.id}" ${Number(last.team_id) === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}
       <label class="check" style="margin-top:14px"><input type="checkbox" id="r-wwcc" ${last.needs_wwcc ? 'checked' : ''}> Needs a Working with Children Check</label>
       <label>Shift length</label>
       <select id="r-len"><option value="30">30 minutes</option><option value="60" selected>1 hour</option><option value="90">1.5 hours</option><option value="120">2 hours</option><option value="180">3 hours</option></select>
@@ -958,44 +959,52 @@
   /* ---------------- Teams ---------------- */
   function showTeams() {
     let list = (teams || []).map(t => ({ ...t }));
+    let labelKey = group.team_label || 'teams';
     const render = () => {
+      const L = TEAM_LABELS[labelKey] || TEAM_LABELS.teams, lc = L.one.toLowerCase(), lcs = L.many.toLowerCase();
+      const role = L.role.charAt(0).toUpperCase() + L.role.slice(1);
       app.innerHTML = `
         ${groupNav('teams')}
-        <div class="toolbar"><h1 style="margin:0">Teams</h1><span class="spacer"></span>
+        <div class="toolbar"><h1 style="margin:0">${esc(L.many)}</h1><span class="spacer"></span>
           <button class="btn secondary small" id="t-bulk">+ Add several</button>
-          <button class="btn small" id="t-add">+ Add team</button></div>
-        <p class="muted">Optional. Teams let you mark which slots belong to which team (e.g. "U12 Blue: Scorer"). Parents can then see just their team's jobs, and you can share a WhatsApp message for one team.</p>
-        <p class="muted">If you add a team manager's email, they'll get the unfilled spot and "who's doing what" emails for their team's slots only, on each event's schedule. Team managers don't need a login and can't see anyone's contact details.</p>
+          <button class="btn small" id="t-add">+ Add ${esc(lc)}</button></div>
+        <p class="muted">Optional, and only needed if your volunteers belong to smaller groups, such as teams, classes or stalls. Mark which slots belong to each one so parents see just theirs, and share a WhatsApp message with a single ${esc(lc)}.</p>
+        <div class="card" style="margin-bottom:12px">
+          <label for="t-label" style="margin-top:0">What do you call them?</label>
+          <select id="t-label">${Object.entries(TEAM_LABELS).map(([k, v]) => `<option value="${k}" ${k === labelKey ? 'selected' : ''}>${esc(v.many)}</option>`).join('')}</select>
+          <p class="small muted" style="margin:6px 0 0">If you add a ${esc(L.role)}'s email, they'll get the unfilled spot and "who's doing what" emails for their ${esc(lc)}'s slots only. They don't need a login and can't see anyone's contact details.</p>
+        </div>
         <div class="stack" id="t-list">${list.map((t, i) => `
           <div class="slot-edit" data-i="${i}">
             <div class="grid team-grid">
-              <div><label>Team name</label><input type="text" data-k="name" maxlength="60" value="${esc(t.name)}" placeholder="e.g. U12 Blue"></div>
-              <div><label>Team manager <span class="opt">(optional)</span></label><input type="text" data-k="manager_name" maxlength="100" value="${esc(t.manager_name || '')}" placeholder="Name"></div>
-              <div><label>Manager email <span class="opt">(optional)</span></label><input type="email" data-k="manager_email" maxlength="200" value="${esc(t.manager_email || '')}" placeholder="name@example.com"></div>
+              <div><label>${esc(L.one)} name</label><input type="text" data-k="name" maxlength="60" value="${esc(t.name)}" placeholder="e.g. ${esc(L.ex[i % L.ex.length])}"></div>
+              <div><label>${esc(role)} <span class="opt">(optional)</span></label><input type="text" data-k="manager_name" maxlength="100" value="${esc(t.manager_name || '')}" placeholder="Name"></div>
+              <div><label>Their email <span class="opt">(optional)</span></label><input type="email" data-k="manager_email" maxlength="200" value="${esc(t.manager_email || '')}" placeholder="name@example.com"></div>
             </div>
             <div class="foot"><span></span><span>
               <button class="btn link" data-up="${i}" ${i ? '' : 'disabled'}>Move up</button>
               <button class="btn link" data-rm="${i}" style="color:var(--bad)">Remove</button></span></div>
-          </div>`).join('') || '<p class="muted">No teams yet.</p>'}</div>
+          </div>`).join('') || `<p class="muted">No ${esc(lcs)} yet.</p>`}</div>
         <div id="t-err"></div>
-        <div class="actionbar show"><div class="inner"><span class="small muted" id="dirty-note">${dirty ? 'Unsaved changes' : 'All changes saved'}</span><button class="btn" id="t-save">Save teams</button></div></div>`;
+        <div class="actionbar show"><div class="inner"><span class="small muted" id="dirty-note">${dirty ? 'Unsaved changes' : 'All changes saved'}</span><button class="btn" id="t-save">Save</button></div></div>`;
       bindNav();
+      $('#t-label').onchange = e => { labelKey = e.target.value; markDirty(); render(); };
       $$('#t-list .slot-edit').forEach(el => {
         const t = list[+el.dataset.i];
         $$('[data-k]', el).forEach(inp => inp.addEventListener('input', () => { t[inp.dataset.k] = inp.value; markDirty(); }));
       });
       $$('[data-rm]').forEach(b => b.onclick = () => {
         const t = list[+b.dataset.rm];
-        if (t.id && !window.confirm(`Remove ${t.name || 'this team'}? Its slots stay in your events, just without a team.`)) return;
+        if (t.id && !window.confirm(`Remove ${t.name || 'this ' + lc}? Its slots stay in your events, just marked for everyone.`)) return;
         list.splice(+b.dataset.rm, 1); markDirty(); render();
       });
       $$('[data-up]').forEach(b => b.onclick = () => { const i = +b.dataset.up; [list[i - 1], list[i]] = [list[i], list[i - 1]]; markDirty(); render(); });
       $('#t-add').onclick = () => { list.push({ name: '', manager_name: '', manager_email: '' }); markDirty(); render(); const ins = $$('#t-list input[data-k=name]'); ins[ins.length - 1].focus(); };
       $('#t-bulk').onclick = () => modal(`
-        <h2>Add several teams</h2>
-        <label for="tb-names">One team per line</label>
-        <textarea id="tb-names" style="min-height:180px" placeholder="U11 Red\nU11 Blue\nU12 Gold"></textarea>
-        <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="tb-go">Add teams</button></div>`,
+        <h2>Add several ${esc(lcs)}</h2>
+        <label for="tb-names">One per line</label>
+        <textarea id="tb-names" style="min-height:180px" placeholder="${esc(L.ex.join('\n'))}"></textarea>
+        <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="tb-go">Add</button></div>`,
         (m, close) => {
           $('#tb-go', m).onclick = () => {
             const have = new Set(list.map(t => t.name.trim().toLowerCase()));
@@ -1007,9 +1016,10 @@
       $('#t-save').onclick = async () => {
         const btn = $('#t-save'); btn.disabled = true; btn.textContent = 'Saving…'; $('#t-err').innerHTML = '';
         try {
-          ({ teams } = await call(A + '/teams', { method: 'PUT', body: { teams: list } }));
-          list = teams.map(t => ({ ...t })); dirty = false; render(); toast('Teams saved.');
-        } catch (err) { $('#t-err').innerHTML = `<div class="error">${esc(err.message)}</div>`; btn.disabled = false; btn.textContent = 'Save teams'; }
+          ({ teams } = await call(A + '/teams', { method: 'PUT', body: { teams: list, label: labelKey } }));
+          group.team_label = labelKey;
+          list = teams.map(t => ({ ...t })); dirty = false; render(); toast('Saved.');
+        } catch (err) { $('#t-err').innerHTML = `<div class="error">${esc(err.message)}</div>`; btn.disabled = false; btn.textContent = 'Save'; }
       };
     };
     render();
@@ -1021,7 +1031,7 @@
     const dates = [...new Set(sorted.map(e => e.first_date).filter(Boolean))];
     modal(`
       <h2>Copy several events</h2>
-      <p class="small muted">For example, copy all of Gala Day 1's events to the next gala day in one go. Copies start as drafts, with the same slots, teams and update schedule, moved to the new date. Volunteers aren't copied.</p>
+      <p class="small muted">Handy for things that repeat, like a carnival, gala day or working bee with several events. Copies start as drafts, with the same slots and update schedule, moved to the new date. Volunteers aren't copied.</p>
       ${dates.length ? `<label for="cm-pick" style="margin-top:0">Quick pick</label>
       <select id="cm-pick"><option value="">Tick events below, or pick a date</option>${dates.map(d => `<option value="${d}">All events on ${esc(fmtDateShort(d))}</option>`).join('')}</select>` : ''}
       <div class="stack" id="cm-list" style="gap:4px;margin-top:10px;max-height:260px;overflow-y:auto">${sorted.map(e => `
@@ -1030,8 +1040,8 @@
       <label for="cm-date">New date <span class="opt">(for the earliest of the chosen events; the rest keep their spacing)</span></label>
       <input type="date" id="cm-date">
       <div class="row">
-        <div><label for="cm-find">In titles, replace <span class="opt">(optional)</span></label><input type="text" id="cm-find" placeholder="e.g. Gala Day 1"></div>
-        <div><label for="cm-rep">with</label><input type="text" id="cm-rep" placeholder="e.g. Gala Day 2"></div>
+        <div><label for="cm-find">In titles, replace <span class="opt">(optional)</span></label><input type="text" id="cm-find" placeholder="e.g. Term 1"></div>
+        <div><label for="cm-rep">with</label><input type="text" id="cm-rep" placeholder="e.g. Term 2"></div>
       </div>
       <div id="cm-err"></div>
       <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="cm-go">Copy events</button></div>`,

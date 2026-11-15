@@ -4,6 +4,17 @@
   window.$$ = (sel, root = document) => [...root.querySelectorAll(sel)];
   window.esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   window.nl2br = s => esc(s).replace(/\n/g, '<br>');
+  // What a group calls its sub-groups (teams, classes, stalls...). Keys match TEAM_LABELS in the worker.
+  window.TEAM_LABELS = {
+    teams:       { one: 'Team', many: 'Teams', role: 'team manager', ex: ['U12 Blue', 'U12 Gold', 'U13 Red'] },
+    classes:     { one: 'Class', many: 'Classes', role: 'class parent', ex: ['KB', '3/4M', '5S'] },
+    year_groups: { one: 'Year group', many: 'Year groups', role: 'year group contact', ex: ['Kindergarten', 'Year 3', 'Year 6'] },
+    age_groups:  { one: 'Age group', many: 'Age groups', role: 'age group coordinator', ex: ['Under 9s', 'Under 12s', 'Under 15s'] },
+    stalls:      { one: 'Stall', many: 'Stalls', role: 'stall coordinator', ex: ['Cake stall', 'Plant stall', 'Book stall'] },
+    committees:  { one: 'Committee', many: 'Committees', role: 'committee lead', ex: ['Fundraising', 'Grounds', 'Events'] },
+    areas:       { one: 'Area', many: 'Areas', role: 'area coordinator', ex: ['Canteen', 'Uniform shop', 'Garden'] },
+  };
+  window.teamTerms = g => TEAM_LABELS[g && g.team_label] || TEAM_LABELS.teams;
 
   window.store = {
     get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },

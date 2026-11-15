@@ -95,7 +95,7 @@
         ${event.description ? `<p>${nl2br(event.description)}</p>` : ''}
         ${teams.length > 1 ? `<div class="team-chips" role="group" aria-label="Show jobs for">
           <span class="small muted">Show:</span>
-          <button type="button" class="chip${teamFilter ? '' : ' on'}" data-team="">All teams</button>
+          <button type="button" class="chip${teamFilter ? '' : ' on'}" data-team="">All ${esc(teamTerms(group).many.toLowerCase())}</button>
           ${teams.map(t => `<button type="button" class="chip${teamFilter === t.id ? ' on' : ''}" data-team="${t.id}">${esc(t.name)}</button>`).join('')}
         </div>` : ''}
         <p class="small muted">${anyOpen ? 'Tap everything you can help with, then press <strong>Sign up</strong>.' : 'Everything is covered. Thank you to all our volunteers!'}</p>

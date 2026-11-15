@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS groups (
   donation_text TEXT NOT NULL DEFAULT '',
   question_label TEXT NOT NULL DEFAULT '',         -- optional extra sign-up question, e.g. "Which team?"
   question_required INTEGER NOT NULL DEFAULT 0,
+  team_label    TEXT NOT NULL DEFAULT '',          -- what the group calls its teams: teams, classes, stalls... ('' = by group type)
   email_limit   INTEGER,                           -- per-group daily cap override (owner can raise)
   suspended_reason TEXT NOT NULL DEFAULT '',
   created_ip    TEXT NOT NULL DEFAULT '',

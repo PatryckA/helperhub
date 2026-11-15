@@ -402,8 +402,14 @@ async function activeGroup(env, slug) {
   return g;
 }
 
+// What a group calls its sub-groups. Keys match TEAM_LABELS in public/assets/hh.js.
+const TEAM_LABELS = { teams: 'team manager', classes: 'class parent', year_groups: 'year group contact', age_groups: 'age group coordinator',
+  stalls: 'stall coordinator', committees: 'committee lead', areas: 'area coordinator' };
+function teamLabel(g) { return TEAM_LABELS[g.team_label] ? g.team_label : (g.kind === 'school' ? 'classes' : 'teams'); }
+
 function publicGroup(env, g) {
   return {
+    team_label: teamLabel(g),
     slug: g.slug, name: g.name, accent: g.accent, welcome_text: g.welcome_text,
     contact_name: g.contact_name, contact_email: g.contact_email,
     logo_url: g.has_logo ? `/api/g/${g.slug}/logo?v=${g.logo_version}` : '',
@@ -851,6 +857,7 @@ async function listTeams(env, group) {
 // Replace the group's team list. Removing a team leaves its slots without a team.
 async function saveTeams(request, env, group) {
   const body = await readJson(request);
+  if (TEAM_LABELS[body.label]) await env.DB.prepare(`UPDATE groups SET team_label = ? WHERE id = ?`).bind(body.label, group.id).run();
   const raw = Array.isArray(body.teams) ? body.teams : [];
   if (raw.length > 80) throw httpError(400, 'A group can have up to 80 teams.');
   const teams = raw.map((t, i) => {
@@ -1223,7 +1230,7 @@ async function queueGapAlerts(env) {
         </div>`).join('');
       const why = box.role === 'organiser'
         ? "You're getting this because you're an organiser of these events. Change the dates or who gets these updates in each event's settings."
-        : `You're getting this as team manager for ${esc([...box.teams].join(', '))}. Questions or want to stop these? Reply to this email.`;
+        : `You're getting this as ${TEAM_LABELS[teamLabel(box.group)]} for ${esc([...box.teams].join(', '))}. Questions or want to stop these? Reply to this email.`;
       await enqueue(env, {
         group_id: box.group.id, to: box.email, priority: 0, reply_to: box.role === 'manager' ? box.replyTo : null, subject: subject.slice(0, 200),
         html: groupEmail(env, box.group, `<p>Hi,</p>${intro}${body}
