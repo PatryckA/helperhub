@@ -56,6 +56,17 @@ CREATE TABLE IF NOT EXISTS login_links (
   used_at     TEXT
 );
 
+-- Teams within a group (e.g. "U12 Blue"), each with an optional team manager who gets updates for their team's slots
+CREATE TABLE IF NOT EXISTS teams (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id      INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  manager_name  TEXT NOT NULL DEFAULT '',
+  manager_email TEXT NOT NULL DEFAULT '',
+  sort_order    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_teams_group ON teams(group_id);
+
 CREATE TABLE IF NOT EXISTS events (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   group_id     INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -85,6 +96,7 @@ CREATE TABLE IF NOT EXISTS slots (
   kind         TEXT NOT NULL DEFAULT 'shift',     -- shift | item
   needs_wwcc   INTEGER NOT NULL DEFAULT 0,        -- 1 = volunteers must give a Working with Children Check
   is_food      INTEGER NOT NULL DEFAULT 1,        -- items only: 1 = ask for dietary info
+  team_id      INTEGER,                           -- optional team this slot is for
   title        TEXT NOT NULL,
   details      TEXT NOT NULL DEFAULT '',
   date         TEXT NOT NULL,

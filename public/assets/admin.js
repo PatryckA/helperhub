@@ -9,6 +9,9 @@
   let dirty = false;
   let tab = 'setup';
   let organisers = null; // cached list for the alert recipient picker
+  let teams = null;      // this group's teams (loaded with the group)
+  const teamName = id => (teams || []).find(t => t.id === Number(id))?.name || '';
+  const slotName = s => (teamName(s.team_id) ? teamName(s.team_id) + ': ' : '') + s.title;
   // close the event's "More" menu when tapping anywhere else
   document.addEventListener('click', e => { const m = $('#more-menu'); if (m && !e.target.closest('.menu-wrap')) m.classList.add('hidden'); });
 
@@ -25,7 +28,8 @@
   function groupNav(active) {
     return `<div class="tabs" style="margin-top:16px">
       <button data-nav="" class="${active === 'events' ? 'active' : ''}">Events</button>
-      <button data-nav="settings" class="${active === 'settings' ? 'active' : ''}">Group settings</button>
+      <button data-nav="teams" class="${active === 'teams' ? 'active' : ''}">Teams</button>
+      <button data-nav="settings" class="${active === 'settings' ? 'active' : ''}">Settings</button>
       <button data-nav="organisers" class="${active === 'organisers' ? 'active' : ''}">Organisers</button>
     </div>`;
   }
@@ -43,8 +47,8 @@
     if (!session.get()) return location.replace('/login');
     if (!group) {
       try {
-        const [s, m] = await Promise.all([call(A + '/settings'), call('/api/me')]);
-        group = s.group; me = m;
+        const [s, m, t] = await Promise.all([call(A + '/settings'), call('/api/me'), call(A + '/teams')]);
+        group = s.group; me = m; teams = t.teams;
         renderHeader();
       } catch (err) {
         platformHeader('<a href="/login?choose=1">My groups</a>');
@@ -53,10 +57,12 @@
       }
     }
     applyAccent(group.accent); // undo any unsaved colour preview
+    $('#modal-root').innerHTML = ''; // close any open dialog when the page changes
     const h = location.hash.slice(1);
     dirty = false;
     if (h === 'settings') return showSettings();
     if (h === 'organisers') return showOrganisers();
+    if (h === 'teams') return showTeams();
     if (h === 'new') return showEditor(blankEvent());
     const m = h.match(/^event\/(\d+)(?:\/(\w+))?$/);
     if (m) {
@@ -95,12 +101,14 @@
       ${groupNav('events')}
       <div class="toolbar">
         <h1 style="margin:0">Events</h1><span class="spacer"></span>
+        ${events.length ? '<button class="btn secondary" id="copymany">Copy several</button>' : ''}
         <button class="btn" id="new">+ New event</button>
       </div>
       ${emailStatusHtml(status)}
       <h2>Upcoming and drafts</h2>${table(upcoming, 'No upcoming events yet. Create one, or duplicate a past event.')}
       ${past.length ? `<h2>Past</h2>${table(past, '')}` : ''}`;
     $('#new').onclick = () => go('new');
+    if ($('#copymany')) $('#copymany').onclick = () => copyManyModal(events);
     bindNav();
     $$('tr.click').forEach(tr => tr.onclick = () => go('event/' + tr.dataset.id));
   }
@@ -311,10 +319,12 @@
 
   const tShort = x => { let [h, m] = x.split(':').map(Number); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return m ? `${h}:${String(m).padStart(2, '0')}${ap}` : `${h}${ap}`; };
   const shortName = g => `${g.first_name} ${g.last_name ? g.last_name[0].toUpperCase() + '.' : ''}`.trim();
-  const upcoming = ev => { const today = new Date().toISOString().slice(0, 10); return ev.slots.filter(s => (s.date || '') >= today); };
+  let shareScope = null; // a team, when sharing just one team's slots
+  const upcoming = ev => { const today = new Date().toISOString().slice(0, 10); return ev.slots.filter(s => (s.date || '') >= today && (!shareScope || Number(s.team_id) === shareScope.id)); };
 
-  const eventUrl = ev => `${location.origin}/${slug}/event/${ev.id}`;
-  const slotLine = (s, n) => s.kind === 'item' ? `• ${s.title} (to bring): ${n}` : `• ${s.title}, ${niceDate(s.date)} ${tShort(s.start_time)} to ${tShort(s.end_time)}: ${n}`;
+  const eventUrl = ev => `${location.origin}/${slug}/event/${ev.id}${shareScope ? `?team=${shareScope.id}` : ''}`;
+  const label = s => shareScope ? s.title : slotName(s);
+  const slotLine = (s, n) => s.kind === 'item' ? `• ${label(s)} (to bring): ${n}` : `• ${label(s)}, ${niceDate(s.date)} ${tShort(s.start_time)} to ${tShort(s.end_time)}: ${n}`;
   const leftIn = s => s.capacity - (s.signups?.length || 0);
 
   // Each returns the ready-made message, or { empty: 'reason' } when there's nothing to say
@@ -339,7 +349,7 @@
         }
         const need = open.map(s => slotLine(s, `${leftIn(s)} ${s.kind === 'item' ? 'needed' : leftIn(s) === 1 ? 'person' : 'people'}`));
         const details = [when ? `When: ${when}` : '', ev.location ? `Where: ${ev.location}` : ''].filter(Boolean).join('\n');
-        return `Hi everyone,\n\nWe need some people to help with a few things to make sure ${ev.title} runs smoothly.${details ? '\n\n' + details : ''}\n\nHere's what we need:\n${need.join('\n')}\n\nIt only takes a minute to sign up: ${eventUrl(ev)}\nThank you!`;
+        return `Hi everyone,\n\nWe need some people${shareScope ? ` from ${shareScope.name}` : ''} to help with a few things to make sure ${ev.title} runs smoothly.${details ? '\n\n' + details : ''}\n\nHere's what we need:\n${need.join('\n')}\n\nIt only takes a minute to sign up: ${eventUrl(ev)}\nThank you!`;
       },
     },
     gaps: {
@@ -347,7 +357,7 @@
       text(ev) {
         const open = upcoming(ev).filter(s => leftIn(s) > 0);
         if (!open.length) return { empty: 'All spots are filled. Nice work!' };
-        return `We still need helpers for ${ev.title}!\n\n${open.map(s => slotLine(s, `${leftIn(s)} more`)).join('\n')}\n\nCan you help? Sign up here: ${eventUrl(ev)}`;
+        return `We still need helpers for ${shareScope ? `${shareScope.name} at ` : ''}${ev.title}!\n\n${open.map(s => slotLine(s, `${leftIn(s)} more`)).join('\n')}\n\nCan you help? Sign up here: ${eventUrl(ev)}`;
       },
     },
     roster: {
@@ -360,9 +370,9 @@
           const names = (s.signups || []).map(g => s.kind === 'item' && g.item_desc ? `${shortName(g)} (${g.item_desc})` : shortName(g));
           return [names.join(', '), leftIn(s) > 0 ? `${leftIn(s)} still needed` : ''].filter(Boolean).join('; ');
         };
-        const parts = [`Here's who's helping at ${ev.title}. Thank you!`];
-        if (shifts.length) parts.push(shifts.map(s => `*${s.title}*, ${niceDate(s.date)} ${tShort(s.start_time)} to ${tShort(s.end_time)}\n${who(s)}`).join('\n\n'));
-        if (items.length) parts.push(`*Things to bring* (drop off by ${tShort(ev.dropoff_time)} ${niceDate(ev.dropoff_date)}${ev.dropoff_note ? ', ' + ev.dropoff_note : ''})\n` + items.map(s => `• ${s.title}: ${who(s)}`).join('\n'));
+        const parts = [`Here's who's helping ${shareScope ? `for ${shareScope.name} ` : ''}at ${ev.title}. Thank you!`];
+        if (shifts.length) parts.push(shifts.map(s => `*${label(s)}*, ${niceDate(s.date)} ${tShort(s.start_time)} to ${tShort(s.end_time)}\n${who(s)}`).join('\n\n'));
+        if (items.length) parts.push(`*Things to bring* (drop off by ${tShort(ev.dropoff_time)} ${niceDate(ev.dropoff_date)}${ev.dropoff_note ? ', ' + ev.dropoff_note : ''})\n` + items.map(s => `• ${label(s)}: ${who(s)}`).join('\n'));
         parts.push(slots.some(s => leftIn(s) > 0) ? `Spots still free: ${eventUrl(ev)}` : 'All spots are filled. See you there!');
         return parts.join('\n\n');
       },
@@ -372,9 +382,14 @@
   function shareModal(ev) {
     const filled = ev.slots.reduce((n, s) => n + (s.signups?.length || 0), 0);
     let kind = filled ? 'gaps' : 'ask';
+    shareScope = null;
+    const evTeams = (teams || []).filter(t => ev.slots.some(s => Number(s.team_id) === t.id));
     if (!ev.published) toast('This event is a draft. Tick "Live" and save so people can sign up.', 'bad');
     modal(`
       <h2>Share on WhatsApp</h2>
+      ${evTeams.length ? `<label for="share-team" style="margin-top:0">Who is it for?</label>
+      <select id="share-team"><option value="">Everyone (all teams)</option>${evTeams.map(t => `<option value="${t.id}">${esc(t.name)} only</option>`).join('')}</select>
+      <p class="small muted" style="margin:4px 0 10px">Pick a team to share just their jobs in their own chat. The link then shows parents only that team's slots.</p>` : ''}
       <div class="choice" role="radiogroup">${Object.entries(SHARE).map(([k, v]) => `
         <label class="choice-item"><input type="radio" name="share-kind" value="${k}" ${k === kind ? 'checked' : ''}>
           <span><strong>${v.label}</strong><br><span class="small muted">${v.hint}</span></span></label>`).join('')}
@@ -394,6 +409,8 @@
         $('#share-empty', m).innerHTML = typeof t === 'string' ? '' : `<div class="notice">${esc(t.empty)}</div>`;
       };
       $$('[name=share-kind]', m).forEach(r => r.onchange = () => { kind = r.value; fill(); });
+      const ts = $('#share-team', m);
+      if (ts) ts.onchange = () => { shareScope = evTeams.find(t => t.id === Number(ts.value)) || null; fill(); };
       fill();
       $('#share-go', m).onclick = () => {
         const text = $('#share-text', m).value.trim();
@@ -405,7 +422,7 @@
         const text = $('#share-text', m).value;
         if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Message copied.'), () => {});
       };
-      $('#share-link', m).onclick = e => { e.preventDefault(); copyLink(ev.id); };
+      $('#share-link', m).onclick = e => { e.preventDefault(); copyLink(ev.id, shareScope?.id); };
     });
   }
 
@@ -435,6 +452,7 @@
           <div><label>People</label><input type="number" data-k="capacity" min="${Math.max(1, n)}" max="500" value="${esc(s.capacity)}"></div>
         </div>
         <textarea data-k="details" placeholder="Task details (optional): what's involved, what to bring, where to go">${esc(s.details)}</textarea>
+        ${teamSelect(s)}
         <label class="check small" style="margin:8px 0 0"><input type="checkbox" data-wwcc ${s.needs_wwcc ? 'checked' : ''}> Needs a Working with Children Check</label>
         ${foot(s, n)}
       </div>`;
@@ -448,6 +466,7 @@
           <div><label>How many</label><input type="number" data-k="capacity" min="${Math.max(1, n)}" max="500" value="${esc(s.capacity)}"></div>
         </div>
         <textarea data-k="details" placeholder="Details (optional), e.g. serves 8, please bring in a disposable dish">${esc(s.details)}</textarea>
+        ${teamSelect(s)}
         <label class="check small" style="margin:8px 0 0"><input type="checkbox" data-food ${s.is_food ? 'checked' : ''}> This is food (ask for dietary info)</label>
         ${foot(s, n)}
       </div>`;
@@ -462,6 +481,8 @@
       }));
       const w = $('[data-wwcc]', el);
       if (w) w.addEventListener('change', () => { s.needs_wwcc = w.checked ? 1 : 0; markDirty(); });
+      const ts = $('[data-team]', el);
+      if (ts) ts.addEventListener('change', () => { s.team_id = ts.value ? +ts.value : null; markDirty(); });
       const f = $('[data-food]', el);
       if (f) f.addEventListener('change', () => { s.is_food = f.checked ? 1 : 0; markDirty(); });
       $('[data-act=copy]', el).onclick = () => {
@@ -470,6 +491,12 @@
       };
       $('[data-act=remove]', el).onclick = () => { current.slots.splice(+el.dataset.i, 1); markDirty(); renderSlots(); };
     });
+  }
+
+  function teamSelect(s) {
+    if (!teams || !teams.length) return '';
+    return `<div class="team-pick"><label class="small muted">Team</label>
+      <select data-team><option value="">Whole event (no team)</option>${teams.map(t => `<option value="${t.id}" ${Number(s.team_id) === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>`;
   }
 
   function dropBlankStarter() {
@@ -493,7 +520,7 @@
     if (last) {
       // continue straight after the previous slot, same length
       const mins = toMin(last.end_time) - toMin(last.start_time);
-      next = { ...next, title: last.title, details: last.details, date: last.date, capacity: last.capacity, needs_wwcc: last.needs_wwcc ? 1 : 0,
+      next = { ...next, title: last.title, details: last.details, date: last.date, capacity: last.capacity, needs_wwcc: last.needs_wwcc ? 1 : 0, team_id: last.team_id ?? null,
         start_time: last.end_time, end_time: fromMin(Math.min(toMin(last.end_time) + (mins > 0 ? mins : 60), 23 * 60 + 55)) };
     }
     current.slots.push(next);
@@ -537,8 +564,8 @@
     return `${esc(g.wwcc_number)}${exp ? `<div class="small muted">Expires ${esc(new Date(exp + 'T12:00:00').toLocaleDateString('en-AU'))}</div>` : ''}${flag}`;
   }
   const slotLabel = s => s.kind === 'item'
-    ? `Bring: ${esc(s.title)}`
-    : `${esc(fmtDateShort(s.date))}, ${fmtTime(s.start_time)} to ${fmtTime(s.end_time)} · ${esc(s.title)}`;
+    ? `Bring: ${esc(slotName(s))}`
+    : `${esc(fmtDateShort(s.date))}, ${fmtTime(s.start_time)} to ${fmtTime(s.end_time)} · ${esc(slotName(s))}`;
   function renderVolunteers() {
     const ev = current;
     $('#tab-body').innerHTML = `
@@ -588,6 +615,7 @@
         <div><label>People per shift</label><input type="number" id="r-cap" min="1" value="${esc(last.capacity || 2)}"></div></div>
       <div class="row"><div><label>From</label><input type="time" id="r-from" value="09:00" step="300"></div>
         <div><label>To</label><input type="time" id="r-to" value="13:00" step="300"></div></div>
+      ${teams && teams.length ? `<label>Team</label><select id="r-team"><option value="">Whole event (no team)</option>${teams.map(t => `<option value="${t.id}" ${Number(last.team_id) === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}
       <label class="check" style="margin-top:14px"><input type="checkbox" id="r-wwcc" ${last.needs_wwcc ? 'checked' : ''}> Needs a Working with Children Check</label>
       <label>Shift length</label>
       <select id="r-len"><option value="30">30 minutes</option><option value="60" selected>1 hour</option><option value="90">1.5 hours</option><option value="120">2 hours</option><option value="180">3 hours</option></select>
@@ -601,7 +629,7 @@
         // drop a blank starter slot if that's all there is
         dropBlankStarter();
         for (let t = from; t < to; t += len) {
-          current.slots.push({ title, details: $('#r-details', m).value, date, start_time: fromMin(t), end_time: fromMin(Math.min(t + len, to)), capacity: +$('#r-cap', m).value || 1, needs_wwcc: $('#r-wwcc', m).checked ? 1 : 0, signups: [] });
+          current.slots.push({ title, details: $('#r-details', m).value, date, start_time: fromMin(t), end_time: fromMin(Math.min(t + len, to)), capacity: +$('#r-cap', m).value || 1, needs_wwcc: $('#r-wwcc', m).checked ? 1 : 0, team_id: $('#r-team', m)?.value ? +$('#r-team', m).value : null, signups: [] });
         }
         close(); markDirty(); renderSlots();
       };
@@ -612,7 +640,7 @@
     modal(`
       <h2>Add a volunteer</h2>
       <label>Slot</label>
-      <select id="v-slot">${current.slots.map(s => `<option value="${s.id}" data-kind="${s.kind || 'shift'}" data-food="${s.is_food ? 1 : 0}" data-wwcc="${s.needs_wwcc ? 1 : 0}">${s.kind === 'item' ? 'Bring: ' + esc(s.title) : `${esc(fmtDateShort(s.date))} ${fmtTime(s.start_time)}, ${esc(s.title)}`} (${s.signups.length}/${s.capacity})</option>`).join('')}</select>
+      <select id="v-slot">${current.slots.map(s => `<option value="${s.id}" data-kind="${s.kind || 'shift'}" data-food="${s.is_food ? 1 : 0}" data-wwcc="${s.needs_wwcc ? 1 : 0}">${s.kind === 'item' ? 'Bring: ' + esc(slotName(s)) : `${esc(fmtDateShort(s.date))} ${fmtTime(s.start_time)}, ${esc(slotName(s))}`} (${s.signups.length}/${s.capacity})</option>`).join('')}</select>
       <div id="v-item" class="hidden">
         <label>Bringing <span class="opt">(optional)</span></label><input type="text" id="v-desc" placeholder="Details, if any">
         <div class="diet-choices" id="v-diet">${Object.entries(DIET).map(([c, l]) => `<label class="chip"><input type="checkbox" value="${c}"> ${l}</label>`).join('')}</div>
@@ -676,7 +704,7 @@
       <h2>Email volunteers</h2>
       <label>Send to</label>
       <select id="m-to"><option value="">Everyone signed up (${people.size} ${people.size === 1 ? 'person' : 'people'})</option>
-        ${ev.slots.filter(s => s.signups.length).map(s => `<option value="${s.id}">Only: ${s.kind === 'item' ? 'Bring: ' + esc(s.title) : `${esc(fmtDateShort(s.date))} ${fmtTime(s.start_time)}, ${esc(s.title)}`} (${s.signups.length})</option>`).join('')}</select>
+        ${ev.slots.filter(s => s.signups.length).map(s => `<option value="${s.id}">Only: ${s.kind === 'item' ? 'Bring: ' + esc(slotName(s)) : `${esc(fmtDateShort(s.date))} ${fmtTime(s.start_time)}, ${esc(slotName(s))}`} (${s.signups.length})</option>`).join('')}</select>
       <label>Subject</label><input type="text" id="m-subj" value="${esc(ev.title)}: update">
       <label>Message</label><textarea id="m-msg" style="min-height:160px" placeholder="Each email starts with 'Hi [first name],' automatically."></textarea>
       <p class="small muted">${status.remaining_24h} emails left today (limit ${status.daily_limit}). Extras wait in the queue and send automatically within the next day.${ev.contact_email ? ` Replies go to ${esc(ev.contact_email)}.` : ''}</p>
@@ -721,8 +749,8 @@
     const rows = [...people.values()].sort((a, b) => (a.last + ' ' + a.first).localeCompare(b.last + ' ' + b.first, 'en', { sensitivity: 'base' }));
     const dates = [...new Set(ev.slots.map(s => s.date))].sort();
     const describe = ({ s, g }) => s.kind === 'item'
-      ? `Bringing: ${g.item_desc ? `${esc(g.item_desc)} <span class="sub">(${esc(s.title)})</span>` : esc(s.title)}`
-      : `${fmtTime(s.start_time)} to ${fmtTime(s.end_time)} <span class="sub">${esc(s.title)}${dates.length > 1 ? ', ' + esc(fmtDateShort(s.date)) : ''}</span>`;
+      ? `Bringing: ${g.item_desc ? `${esc(g.item_desc)} <span class="sub">(${esc(slotName(s))})</span>` : esc(slotName(s))}`
+      : `${fmtTime(s.start_time)} to ${fmtTime(s.end_time)} <span class="sub">${esc(slotName(s))}${dates.length > 1 ? ', ' + esc(fmtDateShort(s.date)) : ''}</span>`;
     const logo = group.logo_url ? new URL(group.logo_url, location.href).href : '';
     const q = group.question_label;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sign-in sheet: ${esc(ev.title)}</title>
@@ -764,8 +792,8 @@
     w.document.open(); w.document.write(html); w.document.close();
   }
 
-  function copyLink(id) {
-    const url = `${location.origin}/${slug}/event/${id}`;
+  function copyLink(id, teamId) {
+    const url = `${location.origin}/${slug}/event/${id}${teamId ? `?team=${teamId}` : ''}`;
     const done = () => toast('Link copied. Paste it into your newsletter or group chat.');
     if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, () => window.prompt('Copy this link:', url));
     else window.prompt('Copy this link:', url);
@@ -924,6 +952,101 @@
         if (+b.dataset.rm === me.user.id) return location.replace('/login?choose=1');
         toast('Organiser removed.'); showOrganisers();
       } catch (err) { toast(err.message, 'bad'); }
+    });
+  }
+
+  /* ---------------- Teams ---------------- */
+  function showTeams() {
+    let list = (teams || []).map(t => ({ ...t }));
+    const render = () => {
+      app.innerHTML = `
+        ${groupNav('teams')}
+        <div class="toolbar"><h1 style="margin:0">Teams</h1><span class="spacer"></span>
+          <button class="btn secondary small" id="t-bulk">+ Add several</button>
+          <button class="btn small" id="t-add">+ Add team</button></div>
+        <p class="muted">Optional. Teams let you mark which slots belong to which team (e.g. "U12 Blue: Scorer"). Parents can then see just their team's jobs, and you can share a WhatsApp message for one team.</p>
+        <p class="muted">If you add a team manager's email, they'll get the unfilled spot and "who's doing what" emails for their team's slots only, on each event's schedule. Team managers don't need a login and can't see anyone's contact details.</p>
+        <div class="stack" id="t-list">${list.map((t, i) => `
+          <div class="slot-edit" data-i="${i}">
+            <div class="grid team-grid">
+              <div><label>Team name</label><input type="text" data-k="name" maxlength="60" value="${esc(t.name)}" placeholder="e.g. U12 Blue"></div>
+              <div><label>Team manager <span class="opt">(optional)</span></label><input type="text" data-k="manager_name" maxlength="100" value="${esc(t.manager_name || '')}" placeholder="Name"></div>
+              <div><label>Manager email <span class="opt">(optional)</span></label><input type="email" data-k="manager_email" maxlength="200" value="${esc(t.manager_email || '')}" placeholder="name@example.com"></div>
+            </div>
+            <div class="foot"><span></span><span>
+              <button class="btn link" data-up="${i}" ${i ? '' : 'disabled'}>Move up</button>
+              <button class="btn link" data-rm="${i}" style="color:var(--bad)">Remove</button></span></div>
+          </div>`).join('') || '<p class="muted">No teams yet.</p>'}</div>
+        <div id="t-err"></div>
+        <div class="actionbar show"><div class="inner"><span class="small muted" id="dirty-note">${dirty ? 'Unsaved changes' : 'All changes saved'}</span><button class="btn" id="t-save">Save teams</button></div></div>`;
+      bindNav();
+      $$('#t-list .slot-edit').forEach(el => {
+        const t = list[+el.dataset.i];
+        $$('[data-k]', el).forEach(inp => inp.addEventListener('input', () => { t[inp.dataset.k] = inp.value; markDirty(); }));
+      });
+      $$('[data-rm]').forEach(b => b.onclick = () => {
+        const t = list[+b.dataset.rm];
+        if (t.id && !window.confirm(`Remove ${t.name || 'this team'}? Its slots stay in your events, just without a team.`)) return;
+        list.splice(+b.dataset.rm, 1); markDirty(); render();
+      });
+      $$('[data-up]').forEach(b => b.onclick = () => { const i = +b.dataset.up; [list[i - 1], list[i]] = [list[i], list[i - 1]]; markDirty(); render(); });
+      $('#t-add').onclick = () => { list.push({ name: '', manager_name: '', manager_email: '' }); markDirty(); render(); const ins = $$('#t-list input[data-k=name]'); ins[ins.length - 1].focus(); };
+      $('#t-bulk').onclick = () => modal(`
+        <h2>Add several teams</h2>
+        <label for="tb-names">One team per line</label>
+        <textarea id="tb-names" style="min-height:180px" placeholder="U11 Red\nU11 Blue\nU12 Gold"></textarea>
+        <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="tb-go">Add teams</button></div>`,
+        (m, close) => {
+          $('#tb-go', m).onclick = () => {
+            const have = new Set(list.map(t => t.name.trim().toLowerCase()));
+            for (const n of $('#tb-names', m).value.split('\n').map(x => x.trim()).filter(Boolean))
+              if (!have.has(n.toLowerCase())) { list.push({ name: n.slice(0, 60), manager_name: '', manager_email: '' }); have.add(n.toLowerCase()); }
+            close(); markDirty(); render();
+          };
+        });
+      $('#t-save').onclick = async () => {
+        const btn = $('#t-save'); btn.disabled = true; btn.textContent = 'Saving…'; $('#t-err').innerHTML = '';
+        try {
+          ({ teams } = await call(A + '/teams', { method: 'PUT', body: { teams: list } }));
+          list = teams.map(t => ({ ...t })); dirty = false; render(); toast('Teams saved.');
+        } catch (err) { $('#t-err').innerHTML = `<div class="error">${esc(err.message)}</div>`; btn.disabled = false; btn.textContent = 'Save teams'; }
+      };
+    };
+    render();
+  }
+
+  /* ---------------- Copy several events (e.g. a whole gala day) ---------------- */
+  async function copyManyModal(events) {
+    const sorted = [...events].sort((a, b) => (b.first_date || '').localeCompare(a.first_date || '') || b.id - a.id);
+    const dates = [...new Set(sorted.map(e => e.first_date).filter(Boolean))];
+    modal(`
+      <h2>Copy several events</h2>
+      <p class="small muted">For example, copy all of Gala Day 1's events to the next gala day in one go. Copies start as drafts, with the same slots, teams and update schedule, moved to the new date. Volunteers aren't copied.</p>
+      ${dates.length ? `<label for="cm-pick" style="margin-top:0">Quick pick</label>
+      <select id="cm-pick"><option value="">Tick events below, or pick a date</option>${dates.map(d => `<option value="${d}">All events on ${esc(fmtDateShort(d))}</option>`).join('')}</select>` : ''}
+      <div class="stack" id="cm-list" style="gap:4px;margin-top:10px;max-height:260px;overflow-y:auto">${sorted.map(e => `
+        <label class="check small" style="margin:0"><input type="checkbox" value="${e.id}" data-date="${esc(e.first_date || '')}"> ${esc(e.title)} <span class="muted">${esc(e.first_date ? fmtDateShort(e.first_date) : 'no slots')}</span></label>`).join('')}
+      </div>
+      <label for="cm-date">New date <span class="opt">(for the earliest of the chosen events; the rest keep their spacing)</span></label>
+      <input type="date" id="cm-date">
+      <div class="row">
+        <div><label for="cm-find">In titles, replace <span class="opt">(optional)</span></label><input type="text" id="cm-find" placeholder="e.g. Gala Day 1"></div>
+        <div><label for="cm-rep">with</label><input type="text" id="cm-rep" placeholder="e.g. Gala Day 2"></div>
+      </div>
+      <div id="cm-err"></div>
+      <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="cm-go">Copy events</button></div>`,
+    (m, close) => {
+      const pick = $('#cm-pick', m);
+      if (pick) pick.onchange = () => $$('#cm-list input', m).forEach(c => { c.checked = !!pick.value && c.dataset.date === pick.value; });
+      $('#cm-go', m).onclick = async () => {
+        const ids = $$('#cm-list input:checked', m).map(c => +c.value);
+        if (!ids.length) { $('#cm-err', m).innerHTML = '<div class="error">Tick at least one event.</div>'; return; }
+        const btn = $('#cm-go', m); btn.disabled = true; btn.textContent = 'Copying…';
+        try {
+          const r = await call(A + '/events/duplicate-many', { method: 'POST', body: { ids, new_date: $('#cm-date', m).value, find: $('#cm-find', m).value, replace: $('#cm-rep', m).value } });
+          close(); toast(`${r.created.length} event${r.created.length === 1 ? '' : 's'} copied as drafts. Check them, then tick "Live".`); showList();
+        } catch (err) { $('#cm-err', m).innerHTML = `<div class="error">${esc(err.message)}</div>`; btn.disabled = false; btn.textContent = 'Copy events'; }
+      };
     });
   }
 

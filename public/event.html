@@ -66,6 +66,7 @@
     $('#back').href = '/' + slug;
     const selected = new Set();
     let event = null;
+    let teamFilter = Number(new URLSearchParams(location.search).get('team')) || null;
 
     async function load() {
       const box = $('#content');
@@ -79,15 +80,24 @@
         return;
       }
       document.title = `${event.title} | ${group.name}`;
+      const teams = event.teams || [];
+      if (teamFilter && !teams.some(t => t.id === teamFilter)) teamFilter = null;
+      // with a team chosen, show that team's slots plus jobs for everyone (no team)
+      const visible = event.slots.filter(s => !teamFilter || !s.team_id || s.team_id === teamFilter);
       const byDate = {};
-      const shifts = event.slots.filter(s => s.kind !== 'item');
-      const items = event.slots.filter(s => s.kind === 'item');
+      const shifts = visible.filter(s => s.kind !== 'item');
+      const items = visible.filter(s => s.kind === 'item');
       for (const s of shifts) (byDate[s.date] ||= []).push(s);
-      const anyOpen = event.slots.some(s => !s.closed && s.filled < s.capacity);
+      const anyOpen = visible.some(s => !s.closed && s.filled < s.capacity);
       box.innerHTML = `
         <h1>${esc(event.title)}</h1>
         ${event.location ? `<p class="muted" style="margin:0">📍 ${esc(event.location)}</p>` : ''}
         ${event.description ? `<p>${nl2br(event.description)}</p>` : ''}
+        ${teams.length > 1 ? `<div class="team-chips" role="group" aria-label="Show jobs for">
+          <span class="small muted">Show:</span>
+          <button type="button" class="chip${teamFilter ? '' : ' on'}" data-team="">All teams</button>
+          ${teams.map(t => `<button type="button" class="chip${teamFilter === t.id ? ' on' : ''}" data-team="${t.id}">${esc(t.name)}</button>`).join('')}
+        </div>` : ''}
         <p class="small muted">${anyOpen ? 'Tap everything you can help with, then press <strong>Sign up</strong>.' : 'Everything is covered. Thank you to all our volunteers!'}</p>
         ${items.length ? `
           <div class="day-heading">Things to bring</div>
@@ -99,6 +109,13 @@
           <div class="stack">${slots.map(slotHtml).join('')}</div>`).join('')}
         ${event.contact_name || event.contact_email ? `<p class="small muted" style="margin-top:28px">Questions? Contact ${event.contact_email
           ? `<a href="mailto:${esc(event.contact_email)}">${esc(event.contact_name || event.contact_email)}</a>` : esc(event.contact_name)}.</p>` : ''}`;
+      $$('.team-chips [data-team]').forEach(b => b.onclick = () => {
+        teamFilter = Number(b.dataset.team) || null;
+        const u = new URL(location.href);
+        if (teamFilter) u.searchParams.set('team', teamFilter); else u.searchParams.delete('team');
+        history.replaceState(null, '', u);
+        load();
+      });
       $$('.slot:not(.disabled)').forEach(el => el.addEventListener('click', () => toggle(+el.dataset.id, el)));
       $$('.slot:not(.disabled)').forEach(el => el.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(+el.dataset.id, el); } }));
       // keep previously ticked slots ticked after a reload
@@ -119,7 +136,7 @@
           <span class="tick" aria-hidden="true">${disabled ? '' : ''}</span>
           <div class="body">
             <div class="time">${fmtTime(s.start_time)} to ${fmtTime(s.end_time)}</div>
-            <div class="title">${esc(s.title)}</div>
+            <div class="title">${s.team_name ? `<span class="team-tag">${esc(s.team_name)}</span> ` : ''}${esc(s.title)}</div>
             ${s.details ? `<div class="details">${nl2br(s.details)}</div>` : ''}
             ${s.needs_wwcc ? '<div style="margin-top:6px"><span class="badge draft">Working with Children Check needed</span></div>' : ''}
             <div class="fill">${status}</div>
@@ -146,7 +163,7 @@
         <div class="card slot${disabled ? ' disabled' : ''}" data-id="${s.id}" ${disabled ? '' : 'tabindex="0" role="checkbox" aria-checked="false"'}>
           <span class="tick" aria-hidden="true"></span>
           <div class="body">
-            <div class="title">${esc(s.title)}</div>
+            <div class="title">${s.team_name ? `<span class="team-tag">${esc(s.team_name)}</span> ` : ''}${esc(s.title)}</div>
             ${s.details ? `<div class="details">${nl2br(s.details)}</div>` : ''}
             <div class="fill">${status}</div>
             <div class="bar"><i style="width:${Math.min(100, (s.filled / s.capacity) * 100)}%"></i></div>

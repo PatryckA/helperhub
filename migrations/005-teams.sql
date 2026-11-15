@@ -1,0 +1,2 @@
+-- Run once in the D1 console on databases created before teams and team managers.
+CREATE TABLE IF NOT EXISTS teams ( id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE, name TEXT NOT NULL, manager_name TEXT NOT NULL DEFAULT '', manager_email TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0 ); CREATE INDEX IF NOT EXISTS idx_teams_group ON teams(group_id); ALTER TABLE slots ADD COLUMN team_id INTEGER;

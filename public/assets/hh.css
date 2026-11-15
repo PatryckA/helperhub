@@ -235,3 +235,16 @@ table.list td.actions { white-space: nowrap; text-align: right; }
 .choice-item { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; font-weight: 400; margin: 0; }
 .choice-item input { width: 18px; height: 18px; margin-top: 2px; flex: none; }
 .choice-item:has(input:checked) { border-color: var(--accent); background: #f5faf9; }
+/* Teams page and team picker */
+.team-grid { grid-template-columns: 1fr 1fr 1.4fr !important; }
+.team-pick { margin-top: 8px; display: flex; gap: 10px; align-items: center; }
+.team-pick label { margin: 0; white-space: nowrap; }
+.team-pick select { max-width: 260px; padding: 8px 10px; }
+@media (max-width: 640px) { .team-grid { grid-template-columns: 1fr !important; } }
+/* Team filter on the sign-up page */
+.team-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 14px 0 4px; }
+.team-chips .chip { font: inherit; font-size: 14px; border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+.team-chips .chip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.team-tag { display: inline-block; font-size: 12px; font-weight: 700; background: #eef3f2; color: var(--accent); border-radius: 6px; padding: 2px 7px; vertical-align: 2px; }
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tabs button { white-space: nowrap; }
