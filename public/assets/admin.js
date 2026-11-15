@@ -324,11 +324,22 @@
       text(ev) {
         const open = upcoming(ev).filter(s => leftIn(s) > 0);
         if (!open.length) return { empty: 'Every spot is already filled.' };
-        const dates = [...new Set(upcoming(ev).map(s => s.kind === 'item' ? ev.dropoff_date : s.date).filter(Boolean))].sort();
-        const when = dates.length ? niceDate(dates[0]) + (dates.length > 1 ? ` to ${niceDate(dates[dates.length - 1])}` : '') : '';
-        const intro = [`Can you help at ${ev.title}?`, [when, ev.location].filter(Boolean).join(', ')].filter(Boolean).join('\n');
+        const all = upcoming(ev);
+        const shifts = all.filter(s => s.kind !== 'item');
+        const dates = [...new Set(shifts.map(s => s.date))].sort();
+        let when = '';
+        if (dates.length === 1) {
+          const day = shifts.filter(s => s.date === dates[0]);
+          const start = day.map(s => s.start_time).sort()[0], end = day.map(s => s.end_time).sort().pop();
+          when = `${niceDate(dates[0])}, ${tShort(start)} to ${tShort(end)}`;
+        } else if (dates.length > 1) {
+          when = `${niceDate(dates[0])} to ${niceDate(dates[dates.length - 1])}`;
+        } else if (ev.dropoff_date) {
+          when = `${niceDate(ev.dropoff_date)}, drop off by ${tShort(ev.dropoff_time)}`;
+        }
         const need = open.map(s => slotLine(s, `${leftIn(s)} ${s.kind === 'item' ? 'needed' : leftIn(s) === 1 ? 'person' : 'people'}`));
-        return `${intro}\n\nWe need:\n${need.join('\n')}\n\nIt only takes a minute to sign up: ${eventUrl(ev)}\nThank you!`;
+        const details = [when ? `When: ${when}` : '', ev.location ? `Where: ${ev.location}` : ''].filter(Boolean).join('\n');
+        return `Hi everyone,\n\nWe need some people to help with a few things to make sure ${ev.title} runs smoothly.${details ? '\n\n' + details : ''}\n\nHere's what we need:\n${need.join('\n')}\n\nIt only takes a minute to sign up: ${eventUrl(ev)}\nThank you!`;
       },
     },
     gaps: {
