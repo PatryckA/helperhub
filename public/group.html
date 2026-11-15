@@ -13,6 +13,13 @@
   <main class="wrap"><div id="content"><div class="spinner"></div></div></main>
   <script>
     (async () => {
+      // events grouped under a heading for the day they start, sorted by title within the day (Under 9s before Under 11s)
+      const byDay = events => {
+        const days = new Map();
+        for (const e of events) { const k = e.first_date || ''; if (!days.has(k)) days.set(k, []); days.get(k).push(e); }
+        return [...days.entries()].sort(([a], [b]) => (a || '9999').localeCompare(b || '9999'))
+          .map(([d, list]) => [d, list.sort((x, y) => x.title.localeCompare(y.title, 'en', { numeric: true, sensitivity: 'base' }))]);
+      };
       const box = $('#content');
       try {
         const { group, events } = await api(`/api/g/${groupSlug()}/events`);
@@ -21,13 +28,14 @@
         box.innerHTML = `
           <h1>Volunteer with ${esc(group.name)}</h1>
           <p class="lead">${group.welcome_text ? nl2br(group.welcome_text) : 'Thank you for helping out! Pick an event below to see what is needed.'}</p>
-          <div class="stack">${events.length ? events.map(e => `
+          ${events.length ? byDay(events).map(([date, list]) => `
+          <div class="day-heading">${date ? esc(fmtDate(date)) : 'Date to be confirmed'}</div>
+          <div class="stack">${list.map(e => `
             <a class="card event-card" href="/${esc(group.slug)}/event/${e.id}">
               <h3>${esc(e.title)}</h3>
-              <div class="meta">${esc(fmtRange(e.first_date, e.last_date))}${e.location ? ' · ' + esc(e.location) : ''}</div>
+              ${e.last_date && e.last_date !== e.first_date || e.location ? `<div class="meta">${[e.last_date && e.last_date !== e.first_date ? fmtRange(e.first_date, e.last_date) : '', e.location].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
               <div style="margin-top:8px">${e.open > 0 ? `<span class="badge">${e.open} spot${e.open === 1 ? '' : 's'} open</span>` : '<span class="badge full">All filled, thank you!</span>'}</div>
-            </a>`).join('') : `<div class="card center"><p><strong>No events need volunteers right now.</strong></p><p class="muted">Check back soon, and thank you for offering to help!</p></div>`}
-          </div>
+            </a>`).join('')}</div>`).join('') : `<div class="stack"><div class="card center"><p><strong>No events need volunteers right now.</strong></p><p class="muted">Check back soon, and thank you for offering to help!</p></div></div>`}
           ${group.contact_email || group.contact_name ? `<p class="small muted" style="margin-top:24px">Questions? Contact ${group.contact_email ? `<a href="mailto:${esc(group.contact_email)}">${esc(group.contact_name || group.contact_email)}</a>` : esc(group.contact_name)}.</p>` : ''}`;
       } catch (err) {
         platformHeader();
