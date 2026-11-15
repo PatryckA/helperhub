@@ -8,6 +8,7 @@
   let current = null;   // event being edited
   let dirty = false;
   let tab = 'setup';
+  let organisers = null; // cached list for the alert recipient picker
 
   const call = (path, opts = {}) => api(path, { ...opts, auth: true }).catch(err => {
     if (err.status === 401) { session.clear(); location.replace('/login'); }
@@ -135,6 +136,7 @@
       </div>
       ${saved ? `<div class="toolbar" style="margin-top:12px">
         <button class="btn secondary small" id="copylink">Copy volunteer link</button>
+        <button class="btn secondary small" id="wa">Share gaps on WhatsApp</button>
         <a class="btn secondary small" href="/${esc(slug)}/event/${ev.id}" target="_blank" rel="noopener">Preview</a>
         <button class="btn secondary small" id="dup">Duplicate event</button>
         <button class="btn secondary small" id="print">Print sign-in sheet</button>
@@ -157,6 +159,7 @@
     });
     if (saved) {
       $('#copylink').onclick = () => copyLink(ev.id);
+      $('#wa').onclick = () => shareGaps(ev);
       $('#dup').onclick = () => duplicateModal(ev);
       $('#print').onclick = () => printSignIn(ev);
       $('#mail').onclick = () => emailModal(ev);
@@ -186,6 +189,7 @@
         <label for="f-dx">Donation message <span class="opt">(optional)</span></label>
         <input id="f-dx" data-k="donation_text" type="text" value="${esc(ev.donation_text || '')}" placeholder="Can't bring something? You're welcome to donate instead.">
       </form>
+      <div class="card" id="alerts" style="margin-top:14px"></div>
       <div class="toolbar" style="margin-top:22px">
         <h2 style="margin:0">Time slots</h2><span class="spacer"></span>
         <button class="btn secondary small" id="addrun">+ Add a run of shifts</button>
@@ -218,7 +222,82 @@
     $('#additem').onclick = addItem;
     $('#addrun').onclick = runModal;
     $('#save').onclick = save;
+    if (!ev._alerts) {
+      ev._alertsAuto = ev.gap_alerts === null || ev.gap_alerts === undefined;
+      ev._alerts = ev._alertsAuto ? [] : (ev.gap_alerts ? ev.gap_alerts.split(',') : []);
+      ev._alertEmails = ev.gap_alert_emails ? ev.gap_alert_emails.split(',') : [];
+    }
+    $('#f-dd').addEventListener('input', () => { if (current._alertsAuto) renderAlerts(); });
     renderSlots();
+    renderAlerts();
+  }
+
+  /* ---------------- Unfilled spot alerts ---------------- */
+  function firstDate() {
+    return current.slots.map(s => s.kind === 'item' ? current.dropoff_date : s.date).filter(Boolean).sort()[0] || '';
+  }
+  function minusDays(d, n) { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() - n); return x.toISOString().slice(0, 10); }
+  function niceDate(d) { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace(',', ''); }
+
+  function renderAlerts() {
+    const ev = current, box = $('#alerts');
+    if (!box) return;
+    const first = firstDate();
+    const dates = ev._alertsAuto ? (first ? [minusDays(first, 3)] : ['']) : ev._alerts;
+    const contact = (ev.contact_email || group.contact_email || '').toLowerCase();
+    const others = (organisers || []).filter(o => o.email.toLowerCase() !== contact);
+    box.innerHTML = `
+      <h2 style="margin:0 0 4px">Unfilled spot alerts</h2>
+      <p class="small muted" style="margin:0 0 10px">If any spots are still empty, we'll email ${contact ? esc(contact) : 'the organisers'} at 9am on each date, with a button to share the gaps in a WhatsApp group.</p>
+      <div class="stack" style="gap:8px">
+        ${dates.map((d, i) => `
+          <div class="toolbar" style="gap:10px;flex-wrap:nowrap">
+            <input type="date" data-alert="${i}" value="${esc(d)}" style="max-width:200px">
+            <span class="small muted">${ev._alertsAuto ? (first ? '3 days before (default)' : 'Add a slot date first') : (d && first ? daysBefore(d, first) : '')}</span>
+            <span class="spacer"></span>
+            <button class="btn link" data-alert-rm="${i}" style="color:var(--bad)">Remove</button>
+          </div>`).join('') || '<p class="small muted" style="margin:0">No alerts for this event.</p>'}
+      </div>
+      ${dates.length < 3 ? '<button class="btn secondary small" id="alert-add" style="margin-top:10px">+ Add an alert</button>' : ''}
+      <div style="margin-top:14px">
+        <div class="small" style="font-weight:600">Also send alerts to</div>
+        ${organisers === null ? '<p class="small muted" style="margin:4px 0 0">Loading organisers…</p>'
+          : others.length ? others.map(o => `<label class="check small" style="margin:6px 0 0"><input type="checkbox" data-alert-to="${esc(o.email.toLowerCase())}" ${ev._alertEmails.includes(o.email.toLowerCase()) ? 'checked' : ''}> ${esc(o.name ? `${o.name} (${o.email})` : o.email)}</label>`).join('')
+          : '<p class="small muted" style="margin:4px 0 0">No other organisers yet. Add them on the Organisers page.</p>'}
+      </div>`;
+    const makeExplicit = () => { if (ev._alertsAuto) { ev._alertsAuto = false; ev._alerts = dates.filter(Boolean); } };
+    $$('[data-alert]', box).forEach(inp => inp.addEventListener('change', () => {
+      makeExplicit(); ev._alerts[+inp.dataset.alert] = inp.value; markDirty(); renderAlerts();
+    }));
+    $$('[data-alert-rm]', box).forEach(b => b.onclick = () => {
+      const i = +b.dataset.alertRm; makeExplicit(); ev._alerts.splice(i, 1); markDirty(); renderAlerts();
+    });
+    const add = $('#alert-add', box);
+    if (add) add.onclick = () => { makeExplicit(); ev._alerts.push(''); markDirty(); renderAlerts(); };
+    $$('[data-alert-to]', box).forEach(c => c.addEventListener('change', () => {
+      const e = c.dataset.alertTo;
+      ev._alertEmails = ev._alertEmails.filter(x => x !== e);
+      if (c.checked) ev._alertEmails.push(e);
+      markDirty();
+    }));
+    if (organisers === null) call(A + '/organisers').then(r => { organisers = r.organisers; renderAlerts(); }, () => { organisers = []; renderAlerts(); });
+  }
+  function daysBefore(d, first) {
+    const n = Math.round((Date.parse(first) - Date.parse(d)) / 86400e3);
+    return n > 1 ? `${n} days before` : n === 1 ? '1 day before' : n === 0 ? 'Day of the event' : 'After the first slot';
+  }
+
+  function shareGaps(ev) {
+    const today = new Date().toISOString().slice(0, 10);
+    const open = ev.slots.filter(s => s.capacity > (s.signups?.length || 0) && (s.date || '') >= today);
+    if (!open.length) { toast('All spots are filled. Nice work!'); return; }
+    const t = x => { let [h, m] = x.split(':').map(Number); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return m ? `${h}:${String(m).padStart(2, '0')}${ap}` : `${h}${ap}`; };
+    const lines = open.map(s => {
+      const left = s.capacity - (s.signups?.length || 0);
+      return s.kind === 'item' ? `• ${s.title} (to bring): ${left} more` : `• ${s.title}, ${niceDate(s.date)} ${t(s.start_time)} to ${t(s.end_time)}: ${left} more`;
+    });
+    const text = `We still need helpers for ${ev.title}!\n\n${lines.join('\n')}\n\nCan you help? Sign up here: ${location.origin}/${slug}/event/${ev.id}`;
+    window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener');
   }
 
   function markDirty() { dirty = true; const n = $('#dirty-note'); if (n) n.textContent = 'Unsaved changes'; }
@@ -264,9 +343,13 @@
       </div>`;
     }).join('');
     $('#dropoff').classList.toggle('hidden', !items.length);
+    if (current._alertsAuto) renderAlerts();
     $$('.slot-edit').forEach(el => {
       const s = current.slots[+el.dataset.i];
-      $$('[data-k]', el).forEach(inp => inp.addEventListener('input', () => { s[inp.dataset.k] = inp.value; markDirty(); }));
+      $$('[data-k]', el).forEach(inp => inp.addEventListener('input', () => {
+        s[inp.dataset.k] = inp.value; markDirty();
+        if (inp.dataset.k === 'date' && current._alertsAuto) renderAlerts();
+      }));
       const w = $('[data-wwcc]', el);
       if (w) w.addEventListener('change', () => { s.needs_wwcc = w.checked ? 1 : 0; markDirty(); });
       $('[data-act=copy]', el).onclick = () => {
@@ -312,7 +395,9 @@
     const btn = $('#save');
     $('#save-err').innerHTML = '';
     btn.disabled = true; btn.textContent = 'Saving…';
-    const body = { ...current, slots: current.slots.map(({ signups, start_utc, event_id, sort_order, ...s }) => s) };
+    const { _alerts, _alertsAuto, _alertEmails, ...rest } = current;
+    const body = { ...rest, slots: current.slots.map(({ signups, start_utc, event_id, sort_order, ...s }) => s),
+      gap_alerts: _alertsAuto ? null : (_alerts || []).filter(Boolean), gap_alert_emails: _alertEmails || [] };
     try {
       const { event } = current.id
         ? await call(A + '/events/' + current.id, { method: 'PUT', body })

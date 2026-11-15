@@ -693,6 +693,8 @@ async function adminSaveEvent(request, env, group, id) {
   };
   if (ev.contact_email && !isEmail(ev.contact_email)) throw httpError(400, 'Contact email does not look right.');
   if (ev.donation_url && !isHttpsUrl(ev.donation_url)) throw httpError(400, 'The donation link must start with https://');
+  ev.gap_alerts = readGapAlerts(body.gap_alerts);
+  ev.gap_alert_emails = await readAlertEmails(env, group, body.gap_alert_emails);
   const tz = group.timezone;
   const raw = Array.isArray(body.slots) ? body.slots : [];
   if (raw.length > 300) throw httpError(400, 'That is a lot of slots! Please split this into more than one event.');
@@ -721,22 +723,26 @@ async function adminSaveEvent(request, env, group, id) {
     return slot;
   });
   if (!slots.length) throw httpError(400, 'Add at least one time slot or item.');
+  if (ev.gap_alerts) {
+    const lastDate = slots.reduce((m, s) => s.date > m ? s.date : m, '');
+    if (ev.gap_alerts.split(',').some(d => d > lastDate)) throw httpError(400, 'Unfilled spot alert dates must be on or before the event.');
+  }
 
   const stmts = [];
   if (id === null) {
     const { n } = await env.DB.prepare(`SELECT COUNT(*) AS n FROM events WHERE group_id = ?`).bind(group.id).first();
     if (n >= 500) throw httpError(400, 'This group has a lot of events. Please delete some old ones first.');
     const r = await env.DB.prepare(`INSERT INTO events (group_id, title, description, location, contact_name, contact_email, published,
-      dropoff_date, dropoff_time, dropoff_note, donation_url, donation_text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      dropoff_date, dropoff_time, dropoff_note, donation_url, donation_text, gap_alerts, gap_alert_emails) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(group.id, ev.title, ev.description, ev.location, ev.contact_name, ev.contact_email, ev.published,
-        ev.dropoff_date, ev.dropoff_time, ev.dropoff_note, ev.donation_url, ev.donation_text).run();
+        ev.dropoff_date, ev.dropoff_time, ev.dropoff_note, ev.donation_url, ev.donation_text, ev.gap_alerts, ev.gap_alert_emails).run();
     id = r.meta.last_row_id;
   } else {
     await loadEvent(env, group, id);
     stmts.push(env.DB.prepare(`UPDATE events SET title=?, description=?, location=?, contact_name=?, contact_email=?, published=?,
-      dropoff_date=?, dropoff_time=?, dropoff_note=?, donation_url=?, donation_text=? WHERE id=? AND group_id=?`)
+      dropoff_date=?, dropoff_time=?, dropoff_note=?, donation_url=?, donation_text=?, gap_alerts=?, gap_alert_emails=? WHERE id=? AND group_id=?`)
       .bind(ev.title, ev.description, ev.location, ev.contact_name, ev.contact_email, ev.published,
-        ev.dropoff_date, ev.dropoff_time, ev.dropoff_note, ev.donation_url, ev.donation_text, id, group.id));
+        ev.dropoff_date, ev.dropoff_time, ev.dropoff_note, ev.donation_url, ev.donation_text, ev.gap_alerts, ev.gap_alert_emails, id, group.id));
     const { results: existing } = await env.DB.prepare(
       `SELECT s.id, s.title, (SELECT COUNT(*) FROM signups WHERE slot_id = s.id) AS n FROM slots s WHERE s.event_id = ?`).bind(id).all();
     const keep = new Set(slots.filter(s => s.id).map(s => s.id));
@@ -779,10 +785,12 @@ async function adminDuplicate(request, env, group, id) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(body.new_date || '') && slots.length)
     shift = Math.round((Date.parse(body.new_date + 'T00:00:00Z') - Date.parse(slots[0].date + 'T00:00:00Z')) / 86400e3);
   const title = opt(body.title, 120) || `${src.title} (copy)`;
+  const alerts = src.gap_alerts ? src.gap_alerts.split(',').map(d => addDays(d, shift)).join(',') : src.gap_alerts;
   const r = await env.DB.prepare(`INSERT INTO events (group_id, title, description, location, contact_name, contact_email, published,
-    dropoff_date, dropoff_time, dropoff_note, donation_url, donation_text) VALUES (?,?,?,?,?,?,0,?,?,?,?,?)`)
+    dropoff_date, dropoff_time, dropoff_note, donation_url, donation_text, gap_alerts, gap_alert_emails) VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?)`)
     .bind(group.id, title, src.description, src.location, src.contact_name, src.contact_email,
-      src.dropoff_date ? addDays(src.dropoff_date, shift) : '', src.dropoff_time, src.dropoff_note, src.donation_url, src.donation_text).run();
+      src.dropoff_date ? addDays(src.dropoff_date, shift) : '', src.dropoff_time, src.dropoff_note, src.donation_url, src.donation_text,
+      alerts ?? null, src.gap_alert_emails || '').run();
   const newId = r.meta.last_row_id;
   const stmts = slots.map(s => {
     const date = addDays(s.date, shift);
@@ -948,6 +956,109 @@ async function queueReminders(env) {
   return groups.size;
 }
 
+/* ---------- unfilled spot alerts ---------- */
+
+const DEFAULT_ALERT_DAYS = 3;
+const ALERT_HOUR = 9; // alerts go out from 9am local time on the alert date
+
+// null = use the default (3 days before the first slot); '' = no alerts; otherwise up to 3 dates
+function readGapAlerts(v) {
+  if (v === null || v === undefined) return null;
+  if (!Array.isArray(v)) throw httpError(400, 'Invalid alert dates.');
+  const dates = [...new Set(v.map(d => String(d || '').trim()).filter(Boolean))].sort();
+  if (dates.length > 3) throw httpError(400, 'You can set up to 3 unfilled spot alerts.');
+  if (dates.some(d => !/^\d{4}-\d{2}-\d{2}$/.test(d))) throw httpError(400, 'Please pick a date for each unfilled spot alert.');
+  return dates.join(',');
+}
+
+async function readAlertEmails(env, group, v) {
+  const list = [...new Set((Array.isArray(v) ? v : []).map(e => String(e || '').trim().toLowerCase()).filter(Boolean))];
+  if (!list.length) return '';
+  const { results } = await env.DB.prepare(`SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.group_id = ?`).bind(group.id).all();
+  const members = new Set(results.map(r => r.email.toLowerCase()));
+  if (list.some(e => !members.has(e))) throw httpError(400, 'Alerts can only go to organisers of this group.');
+  return list.join(',');
+}
+
+function alertDates(ev, firstDate) {
+  if (ev.gap_alerts === null || ev.gap_alerts === undefined) return firstDate ? [addDays(firstDate, -DEFAULT_ALERT_DAYS)] : [];
+  return ev.gap_alerts ? ev.gap_alerts.split(',') : [];
+}
+
+function localNow(tz) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit' }).formatToParts(new Date());
+  const g = t => parts.find(p => p.type === t).value;
+  return { date: `${g('year')}-${g('month')}-${g('day')}`, hour: +g('hour') };
+}
+
+function shortTime(t) { return fmtTime(t).replace(':00', ''); }
+function shortDate(d) { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace(',', ''); }
+
+// The ready-made WhatsApp message for an event's open spots
+function gapShareText(env, group, ev, open) {
+  const lines = open.map(s => s.kind === 'item'
+    ? `• ${s.title} (to bring): ${s.left} more`
+    : `• ${s.title}, ${shortDate(s.date)} ${shortTime(s.start_time)} to ${shortTime(s.end_time)}: ${s.left} more`);
+  return `We still need helpers for ${ev.title}!\n\n${lines.join('\n')}\n\nCan you help? Sign up here: ${siteUrl(env)}/${group.slug}/event/${ev.id}`;
+}
+
+async function queueGapAlerts(env) {
+  const now = new Date().toISOString();
+  const { results } = await env.DB.prepare(`
+    SELECT e.*, (SELECT MIN(date) FROM slots WHERE event_id = e.id) AS first_date
+    FROM events e JOIN groups gr ON gr.id = e.group_id
+    WHERE gr.status = 'active' AND e.published = 1
+      AND EXISTS (SELECT 1 FROM slots WHERE event_id = e.id AND start_utc > ?)
+      AND (e.gap_alerts IS NULL OR e.gap_alerts != '')`).bind(now).all();
+  let sent = 0;
+  const groupCache = {};
+  for (const ev of results) {
+    const group = groupCache[ev.group_id] ||= await env.DB.prepare(`SELECT * FROM groups WHERE id = ?`).bind(ev.group_id).first();
+    const local = localNow(group.timezone);
+    const done = new Set((ev.gap_alerts_sent || '').split(',').filter(Boolean));
+    // due today from 9am, or yesterday's if the hourly run missed it; older dates are skipped (e.g. an event set up late)
+    const due = alertDates(ev, ev.first_date).filter(d => !done.has(d) &&
+      ((d === local.date && local.hour >= ALERT_HOUR) || d === addDays(local.date, -1)));
+    if (!due.length) continue;
+    for (const d of due) done.add(d);
+    await env.DB.prepare(`UPDATE events SET gap_alerts_sent = ? WHERE id = ?`).bind([...done].sort().join(','), ev.id).run();
+
+    const { results: slots } = await env.DB.prepare(`
+      SELECT s.*, (SELECT COUNT(*) FROM signups WHERE slot_id = s.id) AS n FROM slots s
+      WHERE s.event_id = ? AND s.start_utc > ? ORDER BY s.date, s.start_time, s.sort_order, s.id`).bind(ev.id, now).all();
+    const open = slots.filter(s => s.capacity > s.n).map(s => ({ ...s, left: s.capacity - s.n }));
+    if (!open.length) continue; // all filled, nothing to send
+
+    const recipients = new Set();
+    const main = (ev.contact_email || group.contact_email || '').toLowerCase();
+    const { results: orgs } = await env.DB.prepare(`SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.group_id = ?`).bind(group.id).all();
+    const members = orgs.map(o => o.email.toLowerCase());
+    if (main) recipients.add(main); else members.forEach(e => recipients.add(e)); // no contact set: tell every organiser
+    for (const e of (ev.gap_alert_emails || '').split(',').filter(Boolean)) if (members.includes(e)) recipients.add(e);
+
+    const total = open.reduce((n, s) => n + s.left, 0);
+    const wa = `https://wa.me/?text=${encodeURIComponent(gapShareText(env, group, ev, open))}`;
+    const list = open.map(s => `<li style="margin:4px 0"><strong>${esc(s.title)}</strong>${s.kind === 'item' ? ' (to bring)'
+      : `, ${esc(fmtDate(s.date))}, ${esc(fmtTime(s.start_time))} to ${esc(fmtTime(s.end_time))}`}: <strong>${s.left}</strong> of ${s.capacity} still needed</li>`).join('');
+    for (const to of recipients) {
+      await enqueue(env, {
+        group_id: group.id, to, priority: 0,
+        subject: `${total} spot${total === 1 ? '' : 's'} still to fill: ${ev.title}`,
+        html: groupEmail(env, group, `
+          <p>Hi,</p>
+          <p><strong>${esc(ev.title)}</strong> still has ${total} empty spot${total === 1 ? '' : 's'}:</p>
+          <ul style="padding-left:20px">${list}</ul>
+          <p>Tap below to share a ready-made message with the sign-up link. WhatsApp opens so you can pick the group and press send.</p>
+          ${button(wa, 'Share on WhatsApp', '#1f8a4c')}
+          <p><a href="${siteUrl(env)}/${group.slug}/admin#event/${ev.id}/volunteers" style="color:${group.accent}">See who's signed up</a></p>
+          <p style="color:#888;font-size:13px">You're getting this because you're an organiser of this event. Change the alert dates or who gets them in the event's settings.</p>`),
+      });
+      sent++;
+    }
+  }
+  return sent;
+}
+
 async function enqueue(env, m) {
   let fromName = platformName(env);
   if (m.group_id) {
@@ -1034,6 +1145,7 @@ async function sendEmail(env, msg) {
 
 async function runHourly(env) {
   await queueReminders(env);
+  await queueGapAlerts(env);
   await env.DB.prepare(`UPDATE email_queue SET status = 'queued' WHERE status = 'sending' AND created_at < datetime('now', '-30 minutes')`).run();
   await processQueue(env);
   // Housekeeping and privacy: keep only what's needed

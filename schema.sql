@@ -70,6 +70,9 @@ CREATE TABLE IF NOT EXISTS events (
   dropoff_note TEXT NOT NULL DEFAULT '',
   donation_url TEXT NOT NULL DEFAULT '',
   donation_text TEXT NOT NULL DEFAULT '',
+  gap_alerts   TEXT,                               -- unfilled-spot alert dates, comma list; NULL = default (3 days before)
+  gap_alert_emails TEXT NOT NULL DEFAULT '',       -- extra organisers who get the alerts, comma list
+  gap_alerts_sent TEXT NOT NULL DEFAULT '',        -- alert dates already sent
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_events_group ON events(group_id);

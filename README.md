@@ -5,6 +5,7 @@ Free, ad-free volunteer sign-ups for schools, clubs and community groups, at **h
 - Any group can set itself up at `helperhub.au/start` and gets its own page, e.g. `helperhub.au/riverside-football-club`, with its own logo and colours.
 - Volunteers sign up without an account (name, email, mobile), for time slots or "things to bring", and get a confirmation, a calendar invite and a reminder.
 - Organisers log in with an emailed link (no passwords), and a group can have several organisers.
+- Unfilled spot alerts: if spots are still empty, the event contact (and any organisers they pick) get an email at 9am, by default 3 days before the event, with up to 3 dates per event. The email has a "Share on WhatsApp" button that opens WhatsApp with a ready-made message and the sign-up link. The same button is on each event's organiser page. The message lists open spots only, never volunteers' names.
 - The owner (you) has a dashboard at `helperhub.au/owner` to see every group, change email limits and suspend misuse.
 
 ## How it fits together
@@ -67,7 +68,7 @@ When a change needs new database columns, it ships as a file in `migrations/`. P
 
 - Whole-platform email cap per rolling 24 hours: `DAILY_EMAIL_LIMIT` (280, under Brevo's free 300).
 - Per-group daily caps: 40 for the first 14 days, then 150. Change one group's cap on the owner dashboard.
-- Emails over a cap wait in the queue and go out in the next hourly run. Login links always go first.
+- Emails over a cap wait in the queue and go out in the next hourly run. Login links and unfilled spot alerts always go first.
 - New groups must confirm their email; unconfirmed groups are deleted after 7 days. Each IP can create 3 groups a day.
 - Suspending a group hides its pages, stops its emails and blocks its organisers.
 - Volunteer contact details, including Working with Children Check details, are deleted 12 months after the event (see `public/privacy.html`).
