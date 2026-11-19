@@ -921,17 +921,20 @@
 
     // the lines added to the WhatsApp message: each team's own jobs, then jobs for everyone (e.g. things to bring)
     const shared = future.filter(s => !s.team_id);
-    const block = (label, mine, link, style) => {
+    const cap1 = x => x.charAt(0).toUpperCase() + x.slice(1);
+    const block = (label, mine, link, style, page) => {
       const cap = mine.reduce((n, s) => n + s.capacity, 0), got = mine.reduce((n, s) => n + Math.min(s.capacity, s.signups.length), 0);
       const open = mine.filter(s => s.signups.length < s.capacity);
-      if (style === 'jobs') return `• ${label}: ${mine.map(s => `${at(s)}${s.capacity > 1 ? ` x${s.capacity}` : ''}`).join(', ')}\n  ${link}`;
-      if (style === 'roster') return `• ${label}\n${mine.map(s => `  ${at(s)}: ${s.signups.length ? s.signups.map(name).join(', ') : 'nobody yet'}${s.signups.length < s.capacity && s.signups.length ? `, ${s.capacity - s.signups.length} still needed` : ''}`).join('\n')}${open.length ? `\n  ${link}` : ''}`;
-      return `• ${label}: ${got} of ${cap} filled${open.length ? `. Still need: ${open.map(at).join(', ')}` : '. All done, thank you!'}${open.length ? `\n  ${link}` : ''}`;
+      if (style === 'jobs') return `• ${label}: ${mine.map(s => `${at(s)}${s.capacity > 1 ? ` x${s.capacity}` : ''}`).join(', ')}\n  Sign-up link for ${kindInfo(group).people}: ${link}${page ? `\n  ${cap1(role)}'s page (for the ${role} only): ${page}` : ''}`;
+      if (style === 'roster') return `• ${label}\n${mine.map(s => `  ${at(s)}: ${s.signups.length ? s.signups.map(name).join(', ') : 'nobody yet'}${s.signups.length < s.capacity && s.signups.length ? `, ${s.capacity - s.signups.length} still needed` : ''}`).join('\n')}${open.length ? `\n  Sign-up link for ${kindInfo(group).people}: ${link}` : ''}`;
+      return `• ${label}: ${got} of ${cap} filled${open.length ? `. Still need: ${open.map(at).join(', ')}` : '. All done, thank you!'}${open.length ? `\n  Sign-up link for ${kindInfo(group).people}: ${link}` : ''}`;
     };
     const details = style => {
-      const lines = taking.filter(t => mineOf(t).length).map(t => block(t.name, mineOf(t), url(t.id), style));
+      const page = t => t.manager_token ? `${location.origin}/team?t=${t.manager_token}` : '';
+      const lines = taking.filter(t => mineOf(t).length).map(t => block(t.name, mineOf(t), url(t.id), style, style === 'jobs' ? page(t) : ''));
       if (shared.length) lines.push(block(`For everyone`, shared, url(null), style));
-      return lines.join('\n') || 'Nothing has been added to this event yet.';
+      // a blank line between teams so each one stands out
+      return lines.join('\n\n') || 'Nothing has been added to this event yet.';
     };
 
     modal(`

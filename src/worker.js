@@ -1068,8 +1068,9 @@ async function adminMessageManagers(request, env, ctx, group, user, id) {
         <div style="font-weight:bold;font-size:17px">${heading}</div>
         ${mine.length ? list : '<p style="color:#888">Nothing has been added to this event yet.</p>'}
         ${mine.length ? button(wa, label, '#1f8a4c') : ''}
-        <p style="margin-top:-10px;font-size:14px">Sign-up link for your team: <a href="${eventLink(env, group, ev, t.id)}" style="color:${group.accent}">${eventLink(env, group, ev, t.id)}</a></p>
-        <p style="font-size:14px"><a href="${teamPageLink(env, t.page)}" style="color:${group.accent}">Your team page</a>: check your team and share updates any time.</p>
+        <p style="margin-top:-10px;font-size:14px"><strong>Sign-up link to share:</strong><br><a href="${eventLink(env, group, ev, t.id)}" style="color:${group.accent}">${eventLink(env, group, ev, t.id)}</a></p>
+        <p style="font-size:14px;background:#f6f7f9;border-radius:8px;padding:10px 12px"><strong>Your ${TEAM_LABELS[teamLabel(group)]} page (just for you, please don't share):</strong><br>
+          <a href="${teamPageLink(env, t.page)}" style="color:${group.accent}">${teamPageLink(env, t.page)}</a><br>Check your ${esc(t.name)} helpers and get ready-made messages any time.</p>
       </div>`;
     }).join('');
     await enqueue(env, {
