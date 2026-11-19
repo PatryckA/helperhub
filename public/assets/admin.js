@@ -28,8 +28,8 @@
   /** Group navigation shown on every admin screen */
   function groupNav(active) {
     return `<div class="tabs" style="margin-top:16px">
-      <button data-nav="" class="${active === 'events' ? 'active' : ''}">Events</button>
       <button data-nav="teams" class="${active === 'teams' ? 'active' : ''}">${esc(T().many)}</button>
+      <button data-nav="" class="${active === 'events' ? 'active' : ''}">Events</button>
       <button data-nav="settings" class="${active === 'settings' ? 'active' : ''}">${esc(kindInfo(group).settings)}</button>
       <button data-nav="organisers" class="${active === 'organisers' ? 'active' : ''}">${esc(kindInfo(group).organisers)}</button>
     </div>`;
@@ -949,6 +949,9 @@ Thank you!</textarea>
           <input id="s-name" type="text" maxlength="80" value="${esc(g.name)}">
           <label for="s-kind">Type of group</label>
           <select id="s-kind">${Object.entries(GROUP_KINDS).map(([k, v]) => `<option value="${k}" ${k === (g.kind || 'other') ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</select>
+          <label for="s-tl">What do you call your smaller groups?</label>
+          <select id="s-tl">${Object.entries(TEAM_LABELS).map(([k, v]) => `<option value="${k}" ${k === (g.team_label || 'teams') ? 'selected' : ''}>${esc(v.many)}</option>`).join('')}</select>
+          <p class="small muted" style="margin:4px 0 0">Used for the tab and wherever events are split up, e.g. teams, classes or stalls. Only matters if you use them.</p>
           <label>Logo <span class="opt">(PNG or JPG, square-ish works best)</span></label>
           <div class="logo-box">
             <span id="logo-preview">${g.logo_url ? `<img src="${esc(g.logo_url)}" alt="Current logo">` : '<span class="muted small">No logo yet</span>'}</span>
@@ -1010,7 +1013,7 @@ Thank you!</textarea>
       btn.disabled = true;
       try {
         const r = await call(A + '/settings', { method: 'PUT', body: {
-          name: $('#s-name').value, kind: $('#s-kind').value, accent: g.accent, welcome_text: $('#s-welcome').value,
+          name: $('#s-name').value, kind: $('#s-kind').value, team_label: $('#s-tl').value, accent: g.accent, welcome_text: $('#s-welcome').value,
           contact_name: $('#s-cn').value, contact_email: $('#s-ce').value, reminder_hours: +$('#s-rem').value, timezone: $('#s-tz').value,
           question_label: $('#s-q').value, question_required: $('#s-qr').checked, donation_url: $('#s-du').value, donation_text: $('#s-dx').value,
         } });
@@ -1118,11 +1121,7 @@ Thank you!</textarea>
           <button class="btn secondary small" id="t-bulk">+ Add several</button>
           <button class="btn small" id="t-add">+ Add ${esc(lc)}</button></div>
         <p class="muted">Optional, and only needed if your volunteers belong to smaller groups, such as teams, classes or stalls. Mark which slots belong to each one so parents see just theirs, and share a WhatsApp message with a single ${esc(lc)}.</p>
-        <div class="card" style="margin-bottom:12px">
-          <label for="t-label" style="margin-top:0">What do you call them?</label>
-          <select id="t-label">${Object.entries(TEAM_LABELS).map(([k, v]) => `<option value="${k}" ${k === labelKey ? 'selected' : ''}>${esc(v.many)}</option>`).join('')}</select>
-          <p class="small muted" style="margin:6px 0 0">If you add a ${esc(L.role)}'s email, they'll get the unfilled spot and "who's doing what" emails for their ${esc(lc)}'s slots only. They don't need a login and can't see anyone's contact details.</p>
-        </div>
+        <p class="muted small">If you add a ${esc(L.role)}'s email, they'll get the unfilled spot and "who's doing what" emails for their ${esc(lc)}'s slots only. They don't need a login and can't see anyone's contact details. You can change what these are called in ${esc(kindInfo(group).settings)}.</p>
         <div class="stack" id="t-list">${list.map((t, i) => `
           <div class="slot-edit" data-i="${i}">
             <div class="grid team-grid">
@@ -1137,7 +1136,6 @@ Thank you!</textarea>
         <div id="t-err"></div>
         <div class="actionbar show"><div class="inner"><span class="small muted" id="dirty-note">${dirty ? 'Unsaved changes' : 'All changes saved'}</span><button class="btn" id="t-save">Save</button></div></div>`;
       bindNav();
-      $('#t-label').onchange = e => { labelKey = e.target.value; markDirty(); render(); };
       $$('#t-list .slot-edit').forEach(el => {
         const t = list[+el.dataset.i];
         $$('[data-k]', el).forEach(inp => inp.addEventListener('input', () => { t[inp.dataset.k] = inp.value; markDirty(); }));
@@ -1165,8 +1163,7 @@ Thank you!</textarea>
       $('#t-save').onclick = async () => {
         const btn = $('#t-save'); btn.disabled = true; btn.textContent = 'Saving…'; $('#t-err').innerHTML = '';
         try {
-          ({ teams } = await call(A + '/teams', { method: 'PUT', body: { teams: list, label: labelKey } }));
-          group.team_label = labelKey;
+          ({ teams } = await call(A + '/teams', { method: 'PUT', body: { teams: list } }));
           list = teams.map(t => ({ ...t })); dirty = false; render(); toast('Saved.');
         } catch (err) { $('#t-err').innerHTML = `<div class="error">${esc(err.message)}</div>`; btn.disabled = false; btn.textContent = 'Save'; }
       };

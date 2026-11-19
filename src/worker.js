@@ -583,6 +583,7 @@ async function saveSettings(request, env, group) {
   const s = {
     name: req(b.name, 'Group name', 80),
     kind: GROUP_KINDS.includes(b.kind) ? b.kind : group.kind,
+    team_label: TEAM_LABELS[b.team_label] ? b.team_label : group.team_label,
     accent: /^#[0-9a-f]{6}$/i.test(b.accent || '') ? b.accent.toLowerCase() : group.accent,
     welcome_text: opt(b.welcome_text, 1000),
     contact_name: opt(b.contact_name, 100),
@@ -596,9 +597,9 @@ async function saveSettings(request, env, group) {
   };
   if (s.contact_email && !isEmail(s.contact_email)) throw httpError(400, 'Contact email does not look right.');
   if (s.donation_url && !isHttpsUrl(s.donation_url)) throw httpError(400, 'The donation link must start with https://');
-  await env.DB.prepare(`UPDATE groups SET name=?, kind=?, accent=?, welcome_text=?, contact_name=?, contact_email=?, reminder_hours=?, timezone=?,
+  await env.DB.prepare(`UPDATE groups SET name=?, kind=?, team_label=?, accent=?, welcome_text=?, contact_name=?, contact_email=?, reminder_hours=?, timezone=?,
     donation_url=?, donation_text=?, question_label=?, question_required=? WHERE id=?`)
-    .bind(s.name, s.kind, s.accent, s.welcome_text, s.contact_name, s.contact_email, s.reminder_hours, s.timezone,
+    .bind(s.name, s.kind, s.team_label, s.accent, s.welcome_text, s.contact_name, s.contact_email, s.reminder_hours, s.timezone,
       s.donation_url, s.donation_text, s.question_label, s.question_required, group.id).run();
   const g = await env.DB.prepare(`SELECT * FROM groups WHERE id = ?`).bind(group.id).first();
   return json({ group: adminGroup(env, g) });
