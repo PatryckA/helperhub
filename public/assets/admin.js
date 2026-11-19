@@ -110,7 +110,7 @@
       ${past.length ? `<h2>Past</h2>${table(past, '')}` : ''}
       ${emailStatusHtml(status)}`;
     $('#new').onclick = () => go('new');
-    if ($('#copymany')) $('#copymany').onclick = () => copyManyModal(events);
+    if ($('#copymany')) $('#copymany').onclick = () => copyEventModal();
     bindNav();
     $$('tr.click').forEach(tr => tr.onclick = () => go('event/' + tr.dataset.id));
   }
@@ -162,7 +162,7 @@
           <div class="menu hidden" id="more-menu" role="menu">
             <button role="menuitem" id="copylink">Copy volunteer link</button>
             <a role="menuitem" href="/${esc(slug)}/event/${ev.id}" target="_blank" rel="noopener">Preview volunteer page</a>
-            <button role="menuitem" id="dup">Duplicate event</button>
+            <button role="menuitem" id="dup">Copy event</button>
             <button role="menuitem" id="del" class="bad">Delete event</button>
           </div>
         </div>
@@ -188,7 +188,7 @@
       $('#share').onclick = () => shareModal(ev);
       if ($('#managers')) $('#managers').onclick = () => managersModal(ev);
       $('#copylink').onclick = () => copyLink(ev.id);
-      $('#dup').onclick = () => duplicateModal(ev);
+      $('#dup').onclick = () => copyEventModal(ev.id);
       $('#print').onclick = () => printSignIn(ev);
       $('#mail').onclick = () => emailModal(ev);
       $('#del').onclick = () => deleteModal(ev);
@@ -827,28 +827,6 @@
     });
   }
 
-  function duplicateModal(ev) {
-    modal(`
-      <h2>Duplicate event</h2>
-      <p class="small muted">Copies the details and all slots (not the volunteers). The copy starts as a draft.</p>
-      <label>New event name</label><input type="text" id="d-title" value="${esc(ev.title)}">
-      <label>Date of the first slot (or drop-off)</label><input type="date" id="d-date" value="${esc(ev.slots[0]?.date || '')}">
-      <p class="small muted">All slots move by the same number of days, so multi-day events stay in order.</p>
-      ${teams && teams.length ? `<label>${esc(T().many)} taking part in the copy</label>
-      <div class="chip-checks" id="d-teams">${teams.map(t => `<label class="chip-check"><input type="checkbox" value="${t.id}" ${(ev.team_ids || []).includes(t.id) ? 'checked' : ''}> ${esc(t.name)}</label>`).join('')}</div>
-      <p class="small muted">"Each ${esc(T().one.toLowerCase())}" jobs are created for every ticked one. Jobs for one that isn't ticked are left out.</p>` : ''}
-      <div id="d-err"></div>
-      <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="d-go">Duplicate</button></div>`,
-    (m, close) => {
-      $('#d-go', m).onclick = async () => {
-        try {
-          const { event } = await call(`${A}/events/${ev.id}/duplicate`, { method: 'POST', body: { title: $('#d-title', m).value, new_date: $('#d-date', m).value,
-            ...(teams && teams.length ? { team_ids: $$('#d-teams input:checked', m).map(c => +c.value) } : {}) } });
-          close(); toast('Copy created as a draft.'); tab = 'setup'; location.hash = 'event/' + event.id;
-        } catch (err) { $('#d-err', m).innerHTML = `<div class="error">${esc(err.message)}</div>`; }
-      };
-    });
-  }
 
   /* ---------------- Message team managers ---------------- */
   function managersModal(ev) {
@@ -1326,61 +1304,54 @@
     render();
   }
 
-  /* ---------------- Copy several events (e.g. a whole gala day) ---------------- */
-  async function copyManyModal(events) {
+  /* ---------------- Copy event: one event to a new date, with a new name ---------------- */
+  async function copyEventModal(preselectId) {
+    let events;
+    try { ({ events } = await call(A + '/events')); } catch (err) { toast(err.message, 'bad'); return; }
+    if (!events.length) return;
     const sorted = [...events].sort((a, b) => (b.first_date || '').localeCompare(a.first_date || '') || b.id - a.id);
-    const dates = [...new Set(sorted.map(e => e.first_date).filter(Boolean))];
+    const L = T();
     modal(`
       <h2>Copy event</h2>
-      <p class="small muted">Copy one event, or several at once (like a whole gala day or carnival), to a new date. Copies start as drafts, with the same slots and update schedule, moved to the new date. Volunteers aren't copied.</p>
-      ${dates.length ? `<label for="cm-pick" style="margin-top:0">Quick pick</label>
-      <select id="cm-pick"><option value="">Tick events below, or pick a date</option>${dates.map(d => `<option value="${d}">All events on ${esc(fmtDateShort(d))}</option>`).join('')}</select>` : ''}
-      <div class="stack" id="cm-list" style="gap:4px;margin-top:10px;max-height:260px;overflow-y:auto">${sorted.map(e => `
-        <label class="check small" style="margin:0"><input type="checkbox" value="${e.id}" data-date="${esc(e.first_date || '')}"> ${esc(e.title)} <span class="muted">${esc(e.first_date ? fmtDateShort(e.first_date) : 'no slots')}</span></label>`).join('')}
-      </div>
-      <label for="cm-date">New date <span class="opt">(for the earliest of the chosen events; the rest keep their spacing)</span></label>
-      <input type="date" id="cm-date">
-      <div class="row">
-        <div><label for="cm-find">Rename the copies: change <span class="opt">(optional)</span></label><input type="text" id="cm-find" placeholder="e.g. Gala Day 1"></div>
-        <div><label for="cm-rep">to</label><input type="text" id="cm-rep" placeholder="e.g. Gala Day 2"></div>
-      </div>
-      <p class="small muted" style="margin:4px 0 0">Changes that wording in every copied event's name, so "Gala Day 1: Under 12s" becomes "Gala Day 2: Under 12s". Leave blank and copies are named "… (copy)".</p>
-      <div id="cm-teams"></div>
-      <div id="cm-err"></div>
-      <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="cm-go">Copy events</button></div>`,
+      <p class="small muted" style="margin-top:0">Makes a new event with the same details, slots and update schedule, moved to the new date. It starts as a draft. Volunteers aren't copied.</p>
+      <label for="ce-src" style="margin-top:0">Event to copy</label>
+      <select id="ce-src">${sorted.map(e => `<option value="${e.id}" ${e.id === preselectId ? 'selected' : ''}>${esc(e.title)}${e.first_date ? ` (${esc(fmtDateShort(e.first_date))})` : ''}</option>`).join('')}</select>
+      <label for="ce-title">New event name</label>
+      <input type="text" id="ce-title" maxlength="120" placeholder="e.g. Spring Fete 2027">
+      <label for="ce-date">Date of the new event</label>
+      <input type="date" id="ce-date">
+      <p class="small muted" style="margin:4px 0 0">Every slot moves by the same number of days, so a multi-day event stays in order.</p>
+      <div id="ce-teams"></div>
+      <div id="ce-err"></div>
+      <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="ce-go">Copy event</button></div>`,
     (m, close) => {
-      // which teams take part in each copy (starts as the original's teams)
-      const chosen = {};
+      let picked = [];
+      const src = () => sorted.find(e => e.id === +$('#ce-src', m).value);
       const renderTeams = () => {
-        const box = $('#cm-teams', m);
-        if (!teams || !teams.length) return;
-        const picked = sorted.filter(e => $(`#cm-list input[value="${e.id}"]`, m).checked);
-        if (!picked.length) { box.innerHTML = ''; return; }
-        const L = T();
-        box.innerHTML = `<label>${esc(L.many)} taking part in each copy</label>
-          <p class="small muted" style="margin:0 0 6px">"Each ${esc(L.one.toLowerCase())}" jobs are created for every one ticked; jobs for one that's unticked are left out.</p>
-          ${picked.map(e => {
-            const ids = chosen[e.id] ||= [...(e.team_ids || [])];
-            const others = teams.filter(t => !ids.includes(t.id));
-            return `<div class="cm-ev"><div class="small" style="font-weight:600">${esc(e.title)}</div>
-              <div class="chip-checks">${teams.filter(t => ids.includes(t.id)).map(t => `<label class="chip-check"><input type="checkbox" data-ev="${e.id}" value="${t.id}" checked> ${esc(t.name)}</label>`).join('')}
-              ${others.length ? `<select data-add="${e.id}" class="chip-add"><option value="">+ Add…</option>${others.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>` : ''}</div></div>`;
-          }).join('')}`;
-        $$('[data-ev]', box).forEach(c => c.onchange = () => { const id = +c.dataset.ev; chosen[id] = chosen[id].filter(x => x !== +c.value); renderTeams(); });
-        $$('[data-add]', box).forEach(sel => sel.onchange = () => { if (sel.value) { chosen[+sel.dataset.add].push(+sel.value); renderTeams(); } });
+        const box = $('#ce-teams', m);
+        if (!teams || !teams.length) { box.innerHTML = ''; return; }
+        box.innerHTML = `<label>${esc(L.many)} taking part</label>
+          <div class="chip-checks">${teams.map(t => `<label class="chip-check"><input type="checkbox" value="${t.id}" ${picked.includes(t.id) ? 'checked' : ''}> ${esc(t.name)}</label>`).join('')}</div>
+          <p class="small muted" style="margin:6px 0 0">Jobs for every ${esc(L.one.toLowerCase())} are made for each one ticked. Jobs for one that's unticked are left out.</p>`;
+        $$('input', box).forEach(c => c.onchange = () => { picked = $$('#ce-teams input:checked', m).map(x => +x.value); });
       };
-      $$('#cm-list input', m).forEach(c => c.addEventListener('change', renderTeams));
-      const pick = $('#cm-pick', m);
-      if (pick) pick.onchange = () => { $$('#cm-list input', m).forEach(c => { c.checked = !!pick.value && c.dataset.date === pick.value; }); renderTeams(); };
-      $('#cm-go', m).onclick = async () => {
-        const ids = $$('#cm-list input:checked', m).map(c => +c.value);
-        if (!ids.length) { $('#cm-err', m).innerHTML = '<div class="error">Tick at least one event.</div>'; return; }
-        const btn = $('#cm-go', m); btn.disabled = true; btn.textContent = 'Copying…';
+      const pickSource = () => { picked = [...(src()?.team_ids || [])]; renderTeams(); };
+      $('#ce-src', m).onchange = pickSource;
+      pickSource();
+      $('#ce-title', m).focus();
+      $$('#ce-title, #ce-date', m).forEach(i => i.addEventListener('input', () => { $('#ce-err', m).innerHTML = ''; }));
+      $('#ce-go', m).onclick = async () => {
+        const title = $('#ce-title', m).value.trim(), date = $('#ce-date', m).value;
+        const err = msg => { $('#ce-err', m).innerHTML = `<div class="error">${esc(msg)}</div>`; };
+        if (!title) return err('Please give the new event a name.');
+        if (title.toLowerCase() === (src()?.title || '').toLowerCase()) return err('Please give the new event a different name.');
+        if (!date) return err('Please choose the date of the new event.');
+        const btn = $('#ce-go', m); btn.disabled = true; btn.textContent = 'Copying…';
         try {
-          const r = await call(A + '/events/duplicate-many', { method: 'POST', body: { ids, new_date: $('#cm-date', m).value, find: $('#cm-find', m).value, replace: $('#cm-rep', m).value,
-            ...(teams && teams.length ? { teams: Object.fromEntries(ids.map(id => [id, chosen[id] || sorted.find(e => e.id === id)?.team_ids || []])) } : {}) } });
-          close(); toast(`${r.created.length} event${r.created.length === 1 ? '' : 's'} copied as drafts. Check them, then tick "Live".`); showList();
-        } catch (err) { $('#cm-err', m).innerHTML = `<div class="error">${esc(err.message)}</div>`; btn.disabled = false; btn.textContent = 'Copy events'; }
+          const { event } = await call(`${A}/events/${src().id}/duplicate`, { method: 'POST', body: {
+            title, new_date: date, ...(teams && teams.length ? { team_ids: picked } : {}) } });
+          close(); toast('Copied as a draft. Check it, then tick "Live".'); tab = 'setup'; location.hash = 'event/' + event.id;
+        } catch (e) { err(e.message); btn.disabled = false; btn.textContent = 'Copy event'; }
       };
     });
   }
