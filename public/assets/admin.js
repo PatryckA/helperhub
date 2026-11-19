@@ -91,7 +91,7 @@
     const rows = list => list.map(e => `
       <tr class="click" data-id="${e.id}">
         <td><strong>${esc(e.title)}</strong>
-          <div class="small muted">${esc(fmtRange(e.first_date, e.last_date)) || 'No date yet'}${e.location ? ' · ' + esc(e.location) : ''}</div></td>
+          <div class="small muted">${esc(fmtRange(e.first_date, e.last_date)) || 'No date yet'}</div></td>
         <td>${e.archived ? '<span class="badge archived">Archived</span>' : e.published ? '<span class="badge">Live</span>' : '<span class="badge draft">Draft</span>'}</td>
         <td style="white-space:nowrap">${e.filled} / ${e.capacity}</td>
       </tr>`).join('');
