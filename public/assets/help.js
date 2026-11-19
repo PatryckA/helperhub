@@ -161,5 +161,15 @@
       ${ctx.contact ? `<p class="small muted" style="margin-top:14px">Still stuck? Contact ${ctx.contact}.</p>` : ''}`);
   }
 
-  window.HHHelp = { organiser, manager };
+  // how far through Getting started a group is (the "share it" step can't be checked, so it isn't counted)
+  function progress(ctx) {
+    const checks = [
+      !!(ctx.group.logo_url || ctx.group.welcome_text || ctx.group.contact_email),
+      (ctx.events || []).length > 0,
+      (ctx.events || []).some(e => e.published),
+    ];
+    return { done: checks.filter(Boolean).length, total: checks.length };
+  }
+
+  window.HHHelp = { organiser, manager, progress };
 })();

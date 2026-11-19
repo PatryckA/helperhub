@@ -972,7 +972,8 @@ async function saveTeams(request, env, group) {
   });
   const names = teams.map(t => t.name.toLowerCase());
   if (new Set(names).size !== names.length) throw httpError(400, 'Each team needs a different name.');
-  const existing = new Set((await env.DB.prepare(`SELECT id FROM teams WHERE group_id = ?`).bind(group.id).all()).results.map(t => t.id));
+  const before = (await env.DB.prepare(`SELECT id, manager_email FROM teams WHERE group_id = ?`).bind(group.id).all()).results;
+  const existing = new Set(before.map(t => t.id));
   const keep = new Set(teams.filter(t => t.id && existing.has(t.id)).map(t => t.id));
   const stmts = [];
   for (const id of existing) if (!keep.has(id)) {
@@ -984,8 +985,9 @@ async function saveTeams(request, env, group) {
     if (t.id && keep.has(t.id)) {
       stmts.push(env.DB.prepare(`UPDATE teams SET name=?, manager_name=?, manager_email=?, sort_order=? WHERE id=? AND group_id=?`)
         .bind(t.name, t.manager_name, t.manager_email, t.sort_order, t.id, group.id));
-      // "New link": the old manager link stops working
-      if (t.new_link) stmts.push(env.DB.prepare(`UPDATE teams SET manager_token = ? WHERE id = ? AND group_id = ?`).bind(randomToken(), t.id, group.id));
+      // a new manager (different email) gets a new page link, so the old one stops working
+      const old = before.find(b => b.id === t.id);
+      if (t.new_link || (old && old.manager_email && old.manager_email.toLowerCase() !== t.manager_email)) stmts.push(env.DB.prepare(`UPDATE teams SET manager_token = ? WHERE id = ? AND group_id = ?`).bind(randomToken(), t.id, group.id));
     }
     else stmts.push(env.DB.prepare(`INSERT INTO teams (group_id, name, manager_name, manager_email, sort_order) VALUES (?,?,?,?,?)`)
       .bind(group.id, t.name, t.manager_name, t.manager_email, t.sort_order));

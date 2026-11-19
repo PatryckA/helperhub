@@ -307,3 +307,10 @@ ol.help-steps > li:not(:has(.help-tick))::before { counter-increment: hs; conten
 .help-qa { border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; margin: 8px 0; }
 .help-qa > summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
 .help-qa > div { padding: 0 0 10px; }
+/* Floating Help button (organiser pages and team pages) */
+.help-fab { position: fixed; right: 16px; bottom: 16px; z-index: 35; display: inline-flex; align-items: center; gap: 8px; font: inherit; font-weight: 700; font-size: 16px;
+  background: var(--accent); color: var(--on-accent); border: none; border-radius: 999px; padding: 11px 18px 11px 12px; box-shadow: 0 6px 18px rgba(0,0,0,.18); cursor: pointer; }
+.help-fab span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: rgba(255,255,255,.25); font-size: 15px; }
+body:has(.actionbar.show) .help-fab { bottom: 84px; }
+body:has(.modal-backdrop) .help-fab { display: none; }
+.started-bar { background: #f5faf9; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin: 14px 0 4px; }

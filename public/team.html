@@ -33,9 +33,12 @@
       const box = $('#content');
       try {
         const data = await api('/api/team/' + encodeURIComponent(token));
-        groupHeader(data.group, '<a href="#" id="hdr-help" class="help-link">Help</a>'); siteFooter(data.group);
-        $('#hdr-help').onclick = e => { e.preventDefault(); HHHelp.manager({ group: data.group, team: data.team.name, role: data.role,
+        groupHeader(data.group); siteFooter(data.group);
+        document.body.insertAdjacentHTML('beforeend', '<button type="button" class="help-fab" id="help-fab" aria-label="Help and guidance"><span aria-hidden="true">?</span> Help</button>');
+        $('#help-fab').onclick = () => { HHHelp.manager({ group: data.group, team: data.team.name, role: data.role,
           contact: data.contact.email ? `<a href="mailto:${esc(data.contact.email)}">${esc(data.contact.name || data.contact.email)}</a>` : '' }); };
+        // first visit: show the guide once
+        try { if (!localStorage.getItem('hh_team_help_seen')) { localStorage.setItem('hh_team_help_seen', '1'); $('#help-fab').click(); } } catch { /* ignore */ }
         const role = data.role.charAt(0).toUpperCase() + data.role.slice(1);
         document.title = `${data.team.name}: ${role} page`;
         box.innerHTML = `

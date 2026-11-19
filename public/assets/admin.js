@@ -107,6 +107,7 @@
         ${events.length ? '<button class="btn secondary" id="copymany">Copy event</button>' : ''}
       </div>
       ${emailWarningsHtml(status)}
+      ${startedBar(events)}
       <h2>Upcoming and drafts</h2>${table(upcoming, 'No upcoming events yet. Create one, or duplicate a past event.')}
       ${past.length ? `<div class="toolbar" style="margin-top:22px"><h2 style="margin:0">Past</h2><span class="spacer"></span>
         <button class="btn secondary small" id="archive-past">Archive all past events</button></div>${table(past, '')}` : ''}
@@ -114,6 +115,8 @@
         <p class="small muted">Hidden from volunteers, with no reminders or updates. Open one to restore it.</p>${table(archived, '')}</details>` : ''}
       ${emailStatusHtml(status)}`;
     $('#new').onclick = () => go('new');
+    if ($('#started-open')) $('#started-open').onclick = () => openHelp(true);
+    if ($('#started-hide')) $('#started-hide').onclick = () => { try { localStorage.setItem('hh_started_hidden_' + slug, '1'); } catch { /* ignore */ } $('.started-bar').remove(); };
     maybeFirstHelp();
     if ($('#archive-past')) $('#archive-past').onclick = async () => {
       if (!window.confirm(`Archive ${past.length} past event${past.length === 1 ? '' : 's'}? They're kept and can be restored any time.`)) return;
@@ -1074,6 +1077,21 @@
     try { ({ events } = await call(A + '/events')); } catch { /* help still works without the list */ }
     HHHelp.organiser({ group, teams, events, page, first, go: hash => go(hash) });
   }
+  // a reminder on the Events page until the basics are done (can be hidden)
+  function startedBar(events) {
+    const p = HHHelp.progress({ group, events });
+    let hidden = false;
+    try { hidden = !!localStorage.getItem('hh_started_hidden_' + slug); } catch { /* ignore */ }
+    if (p.done >= p.total || hidden) return '';
+    return `<div class="started-bar">
+      <div><strong>Getting started:</strong> ${p.done} of ${p.total} done</div>
+      <div class="bar" style="max-width:none"><i style="width:${Math.round(p.done / p.total * 100)}%"></i></div>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn small" id="started-open">Show me how</button>
+        <button class="btn small link" id="started-hide">Hide</button>
+      </div></div>`;
+  }
+
   function maybeFirstHelp() {
     try {
       const k = 'hh_help_seen_' + slug;
@@ -1084,9 +1102,12 @@
   }
 
   function renderHeader() {
-    groupHeader(group, `<a href="#" id="hdr-help" class="help-link">Help</a><a href="/${esc(slug)}" target="_blank">View page</a>${me.groups.length > 1 || me.is_owner ? '<a href="/login?choose=1">My groups</a>' : ''}${me.is_owner ? '<a href="/owner">Owner</a>' : ''}<a href="#" id="hdr-logout">Log out</a>`);
+    groupHeader(group, `<a href="/${esc(slug)}" target="_blank">View page</a>${me.groups.length > 1 || me.is_owner ? '<a href="/login?choose=1">My groups</a>' : ''}${me.is_owner ? '<a href="/owner">Owner</a>' : ''}<a href="#" id="hdr-logout">Log out</a>`);
     $('#hdr-logout').onclick = e => { e.preventDefault(); logout(); };
-    $('#hdr-help').onclick = e => { e.preventDefault(); openHelp(false); };
+    if (!$('#help-fab')) {
+      document.body.insertAdjacentHTML('beforeend', '<button type="button" class="help-fab" id="help-fab" aria-label="Help and guidance"><span aria-hidden="true">?</span> Help</button>');
+      $('#help-fab').onclick = () => openHelp(false);
+    }
     document.title = `${group.name} | HelperHub organisers`;
   }
 
@@ -1281,7 +1302,7 @@
           <button class="btn secondary small" id="t-bulk">+ Add several</button>
           <button class="btn small" id="t-add">+ Add ${esc(lc)}</button></div>
         <p class="muted">Optional, and only needed if your volunteers belong to smaller groups, such as teams, classes or stalls. Mark which slots belong to each one so parents see just theirs, and share a WhatsApp message with a single ${esc(lc)}.</p>
-        <p class="muted small">Each ${esc(lc)} has a private page for its ${esc(L.role)}: their upcoming events, who's signed up, and ready-made WhatsApp messages. Copy the link below each one. If you add a ${esc(L.role)}'s email, they'll also get the unfilled spot and "who's doing what" emails for their ${esc(lc)}'s slots, with the page link. They don't need a login and can't see anyone's contact details. You can change what these are called in ${esc(kindInfo(group).settings)}.</p>
+        <p class="muted small">Each ${esc(lc)} has a private page for its ${esc(L.role)}: their upcoming events, who's signed up, and ready-made WhatsApp messages. Copy the link below each one. If you change a ${esc(L.role)}'s email, they get a new link and the old one stops working. If you add a ${esc(L.role)}'s email, they'll also get the unfilled spot and "who's doing what" emails for their ${esc(lc)}'s slots, with the page link. They don't need a login and can't see anyone's contact details. You can change what these are called in ${esc(kindInfo(group).settings)}.</p>
         <div class="stack" id="t-list">${list.map((t, i) => `
           <div class="slot-edit" data-i="${i}">
             <div class="grid team-grid">
@@ -1290,8 +1311,7 @@
               <div><label>Their email <span class="opt">(optional)</span></label><input type="email" data-k="manager_email" maxlength="200" value="${esc(t.manager_email || '')}" placeholder="name@example.com"></div>
             </div>
             <div class="foot"><span>${t.id && t.manager_token ? `
-              <button class="btn link" data-mlink="${i}">Copy ${esc(L.role)}'s page link</button>
-              <button class="btn link muted" data-newlink="${i}">${t.new_link ? 'New link on save' : 'New link'}</button>` : '<span class="small muted">Save to get a page link</span>'}</span><span>
+              <button class="btn link" data-mlink="${i}">Copy ${esc(L.role)}'s page link</button>` : '<span class="small muted">Save to get a page link</span>'}</span><span>
               <button class="btn link" data-up="${i}" ${i ? '' : 'disabled'}>Move up</button>
               <button class="btn link" data-rm="${i}" style="color:var(--bad)">Remove</button></span></div>
           </div>`).join('') || `<p class="muted">No ${esc(lcs)} yet.</p>`}</div>
@@ -1312,12 +1332,6 @@
         const url = `${location.origin}/team?t=${list[+b.dataset.mlink].manager_token}`;
         if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast(`Copied. Send it to the ${L.role} only: it's their private page.`), () => prompt('Copy this link', url));
         else prompt('Copy this link', url);
-      });
-      $$('[data-newlink]').forEach(b => b.onclick = () => {
-        const t = list[+b.dataset.newlink];
-        if (t.new_link) { t.new_link = false; render(); return; }
-        if (!window.confirm(`Make a new page link for ${t.name}? The old link stops working once you save.`)) return;
-        t.new_link = true; markDirty(); render();
       });
       $('#t-add').onclick = () => { list.push({ name: '', manager_name: '', manager_email: '' }); markDirty(); render(); const ins = $$('#t-list input[data-k=name]'); ins[ins.length - 1].focus(); };
       $('#t-bulk').onclick = () => modal(`
