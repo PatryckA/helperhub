@@ -80,7 +80,7 @@
         body: ul([
           `List the ${many} your helpers come from. <em>+ Add several</em> lets you paste a list, one per line.`,
           `Add each ${role}'s email so they get updates about their own ${one}'s spots. They don't need a login.`,
-          `<strong>Copy ${role}'s page link</strong> gives you a private link to send them. It shows their ${one}'s jobs, who's signed up, and buttons to message their parents. The link stays the same all season.`,
+          `<strong>Share ${role}'s page</strong> sends them their private page by WhatsApp, email, text or a copied link. It shows their ${one}'s jobs, who's signed up, and buttons to message their parents. The link stays the same all season.`,
           `To call these something else (e.g. Classes or Stalls), change it in <em>${K.settings}</em>.`,
         ]),
       },

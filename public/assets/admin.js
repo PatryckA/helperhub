@@ -1317,7 +1317,7 @@
           <button class="btn secondary small" id="t-bulk">+ Add several</button>
           <button class="btn small" id="t-add">+ Add ${esc(lc)}</button></div>
         <p class="muted">Optional, and only needed if your volunteers belong to smaller groups, such as teams, classes or stalls. Mark which slots belong to each one so parents see just theirs, and share a WhatsApp message with a single ${esc(lc)}.</p>
-        <p class="muted small">Each ${esc(lc)} has a private page for its ${esc(L.role)}: their upcoming events, who's signed up, and ready-made WhatsApp messages. Copy the link below each one. If you change a ${esc(L.role)}'s email, they get a new link and the old one stops working. If you add a ${esc(L.role)}'s email, they'll also get the unfilled spot and "who's doing what" emails for their ${esc(lc)}'s slots, with the page link. They don't need a login and can't see anyone's contact details. You can change what these are called in ${esc(kindInfo(group).settings)}.</p>
+        <p class="muted small">Each ${esc(lc)} has a private page for its ${esc(L.role)}: their upcoming events, who's signed up, and ready-made WhatsApp messages. Use <strong>Share</strong> below each one to send it to them. If you change a ${esc(L.role)}'s email, they get a new link and the old one stops working. If you add a ${esc(L.role)}'s email, they'll also get the unfilled spot and "who's doing what" emails for their ${esc(lc)}'s slots, with the page link. They don't need a login and can't see anyone's contact details. You can change what these are called in ${esc(kindInfo(group).settings)}.</p>
         <div class="stack" id="t-list">${list.map((t, i) => `
           <div class="slot-edit" data-i="${i}">
             <div class="grid team-grid">
@@ -1326,7 +1326,7 @@
               <div><label>Their email <span class="opt">(optional)</span></label><input type="email" data-k="manager_email" maxlength="200" value="${esc(t.manager_email || '')}" placeholder="name@example.com"></div>
             </div>
             <div class="foot"><span>${t.id && t.manager_token ? `
-              <button class="btn link" data-mlink="${i}">Copy ${esc(L.role)}'s page link</button>` : '<span class="small muted">Save to get a page link</span>'}</span><span>
+              <button class="btn secondary small" data-mlink="${i}">Share ${esc(L.role)}'s page</button>` : '<span class="small muted">Save to get a page link</span>'}</span><span>
               <button class="btn link" data-up="${i}" ${i ? '' : 'disabled'}>Move up</button>
               <button class="btn link" data-rm="${i}" style="color:var(--bad)">Remove</button></span></div>
           </div>`).join('') || `<p class="muted">No ${esc(lcs)} yet.</p>`}</div>
@@ -1343,11 +1343,7 @@
         list.splice(+b.dataset.rm, 1); markDirty(); render();
       });
       $$('[data-up]').forEach(b => b.onclick = () => { const i = +b.dataset.up; [list[i - 1], list[i]] = [list[i], list[i - 1]]; markDirty(); render(); });
-      $$('[data-mlink]').forEach(b => b.onclick = () => {
-        const url = `${location.origin}/team?t=${list[+b.dataset.mlink].manager_token}`;
-        if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast(`Copied. Send it to the ${L.role} only: it's their private page.`), () => prompt('Copy this link', url));
-        else prompt('Copy this link', url);
-      });
+      $$('[data-mlink]').forEach(b => b.onclick = () => shareTeamPage(list[+b.dataset.mlink], L));
       $('#t-add').onclick = () => { list.push({ name: '', manager_name: '', manager_email: '' }); markDirty(); render(); const ins = $$('#t-list input[data-k=name]'); ins[ins.length - 1].focus(); };
       $('#t-bulk').onclick = () => modal(`
         <h2>Add several ${esc(lcs)}</h2>
@@ -1371,6 +1367,38 @@
       };
     };
     render();
+  }
+
+  /* Send a team contact their private page: WhatsApp, email, the phone's own share options, or copy */
+  function shareTeamPage(t, L) {
+    const url = `${location.origin}/team?t=${t.manager_token}`;
+    const first = (t.manager_name || '').trim().split(' ')[0];
+    const text = `Hi${first ? ' ' + first : ''}, here's your ${L.role} page for ${t.name} on HelperHub. It shows your ${L.one.toLowerCase()}'s volunteer spots and who's signed up, with ready-made messages to send your parents. It's just for you, so please don't share it.\n\n${url}`;
+    const subject = `Your ${L.role} page for ${t.name}`;
+    modal(`
+      <h2>Share ${esc(t.name)}'s ${esc(L.role)} page</h2>
+      <p class="small muted" style="margin-top:-6px">Send ${esc(first || `the ${L.role}`)} their private page. It stays the same all season.</p>
+      <div class="share-options">
+        <button class="btn wa" data-way="wa">WhatsApp</button>
+        <button class="btn secondary" data-way="email">Email${t.manager_email ? ` ${esc(first || '')}`.trimEnd() : ''}</button>
+        <button class="btn secondary" data-way="sms">Text message</button>
+        <button class="btn secondary" data-way="copy">Copy link</button>
+        ${navigator.share ? '<button class="btn secondary" data-way="more">More options…</button>' : ''}
+      </div>
+      <p class="small muted" style="word-break:break-all">${esc(url)}</p>
+      <div class="actions" style="margin-top:6px"><button class="btn secondary" data-close>Close</button></div>`,
+    (m, close) => {
+      const ways = {
+        wa: () => window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener'),
+        email: () => { location.href = `mailto:${encodeURIComponent(t.manager_email || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`; },
+        sms: () => { location.href = `sms:?&body=${encodeURIComponent(text)}`; },
+        copy: () => navigator.clipboard
+          ? navigator.clipboard.writeText(url).then(() => toast(`Link copied. Send it to the ${L.role} only.`), () => prompt('Copy this link', url))
+          : prompt('Copy this link', url),
+        more: () => navigator.share({ title: subject, text }).catch(() => {}),
+      };
+      $$('[data-way]', m).forEach(b => b.onclick = () => { ways[b.dataset.way](); if (b.dataset.way !== 'more') close(); });
+    });
   }
 
   /* ---------------- Copy event: one event to a new date, with a new name ---------------- */

@@ -314,3 +314,5 @@ ol.help-steps > li:not(:has(.help-tick))::before { counter-increment: hs; conten
 body:has(.actionbar.show) .help-fab { bottom: 84px; }
 body:has(.modal-backdrop) .help-fab { display: none; }
 .started-bar { background: #f5faf9; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin: 14px 0 4px; }
+.share-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+.share-options .btn { width: 100%; }
