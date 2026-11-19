@@ -754,7 +754,11 @@ async function adminSaveEvent(request, env, group, id) {
     }
     const key = /^[A-Za-z0-9_-]{6,40}$/.test(s.job_key || '') ? s.job_key : randomToken().slice(0, 12);
     const ids = s.team_slot_ids && typeof s.team_slot_ids === 'object' ? s.team_slot_ids : {};
-    for (const t of taking) raw.push({ ...s, each_team: false, team_id: t.id, job_key: key, id: ids[t.id] || ids[String(t.id)] || null });
+    // for_teams: the teams picked for this job (missing = every team taking part)
+    const pick = Array.isArray(s.for_teams) ? new Set(s.for_teams.map(Number)) : null;
+    const targets = pick ? taking.filter(t => pick.has(t.id)) : taking;
+    if (pick && !targets.length) throw httpError(400, `"${s.title || 'A slot'}" needs at least one team picked.`);
+    for (const t of targets) raw.push({ ...s, each_team: false, team_id: t.id, job_key: key, id: ids[t.id] || ids[String(t.id)] || null });
   }
   if (raw.length > 300) throw httpError(400, 'That is a lot of slots! Please split this into more than one event.');
   if (raw.some(s => s.kind === 'item')) {
@@ -886,12 +890,16 @@ async function duplicateOne(env, group, src, shift, title, teamIds) {
   const want = new Set(Array.isArray(teamIds) ? teamIds.map(Number) : srcTeams);
   const taking = groupTeams.map(t => t.id).filter(id => want.has(id));
   const out = [], seenJobs = new Set();
+  const srcSet = new Set(srcTeams);
   for (const s of slots) {
     if (s.job_key) {
       if (seenJobs.has(s.job_key)) continue;
       seenJobs.add(s.job_key);
+      // a job for every team in the original goes to every team in the copy; a job for some teams keeps those (if still taking part)
+      const had = new Set(slots.filter(x => x.job_key === s.job_key).map(x => x.team_id));
+      const forAll = had.size > 1 && had.size === srcSet.size && [...had].every(t => srcSet.has(t));
       const key = randomToken().slice(0, 12);
-      for (const t of taking) out.push({ ...s, team_id: t, job_key: key });
+      for (const t of taking) if (forAll || had.has(t)) out.push({ ...s, team_id: t, job_key: key });
     } else if (!s.team_id || want.has(s.team_id)) out.push(s);
   }
   const shiftList = v => v ? v.split(',').map(d => addDays(d, shift)).join(',') : (v ?? null);
@@ -1044,7 +1052,10 @@ async function adminMessageManagers(request, env, ctx, group, user, id) {
     }).join('');
     await enqueue(env, {
       group_id: group.id, to, subject, reply_to: replyTo,
-      html: groupEmail(env, group, `<p>Hi${m.name ? ' ' + esc(m.name.split(' ')[0]) : ''},</p>${paragraphs(message)}${sections}
+      // the templates start "Hi everyone,": swap that for the manager's name rather than greeting twice
+      html: groupEmail(env, group, `${/^\s*(hi|hello|dear|hey)\b[^\n]*\n/i.test(message)
+        ? paragraphs(message.replace(/^\s*(hi|hello|dear|hey) everyone,?/i, `Hi ${m.name ? m.name.split(' ')[0] : 'there'},`))
+        : `<p>Hi${m.name ? ' ' + esc(m.name.split(' ')[0]) : ''},</p>${paragraphs(message)}`}${sections}
         <p style="color:#888;font-size:13px">You're getting this as ${TEAM_LABELS[teamLabel(group)]} for ${esc(m.teams.map(t => t.name).join(', '))} at ${esc(ev.title)}. Reply to this email to reach the organiser.</p>`),
     });
   }

@@ -243,7 +243,7 @@
 
   function renderSetup() {
     const ev = current;
-    if (!ev.rows) { ev.rows = collapseSlots(ev.slots); ev.team_ids = ev.team_ids || []; }
+    if (!ev.rows) { ev.team_ids = ev.team_ids || []; ev.rows = collapseSlots(ev.slots, ev.team_ids); }
     if (!ev._fold) {
       // which sections start open: the ones with something in them (time slots open on a new event)
       const shifts = ev.rows.some(r => r.kind !== 'item'), items = ev.rows.some(r => r.kind === 'item');
@@ -512,7 +512,7 @@
     const items = entries.filter(e => e.s.kind === 'item');
     const foot = (s, n) => `
         <div class="foot">
-          <span class="muted">${s.each_team ? `One for each of ${takingTeams().length} ${esc(T().many.toLowerCase())}${n ? ` · ${n} signed up` : ''}` : n ? `${n} signed up` : ''}</span>
+          <span class="muted">${s.each_team ? `One for each of ${targetsOf(s).length} ${esc((targetsOf(s).length === 1 ? T().one : T().many).toLowerCase())}${n ? ` · ${n} signed up` : ''}` : n ? `${n} signed up` : ''}</span>
           <span>
             <button class="btn link" data-act="copy">Copy</button>
             <button class="btn link" data-act="remove" ${n ? 'disabled title="Remove the volunteers first"' : ''} style="color:var(--bad)">Remove</button>
@@ -527,7 +527,7 @@
           <div><label>Date</label><input type="date" data-k="date" value="${esc(s.date)}"></div>
           <div><label>Start</label><input type="time" data-k="start_time" value="${esc(s.start_time)}" step="300"></div>
           <div><label>End</label><input type="time" data-k="end_time" value="${esc(s.end_time)}" step="300"></div>
-          <div><label>People</label><input type="number" data-k="capacity" min="${Math.max(1, n)}" max="500" value="${esc(s.capacity)}"></div>
+          <div><label>People${s.each_team ? ' <span class="opt">per ' + esc(T().one.toLowerCase()) + '</span>' : ''}</label><input type="number" data-k="capacity" min="${Math.max(1, s.each_team ? 1 : n)}" max="500" value="${esc(s.capacity)}"></div>
         </div>
         <textarea data-k="details" placeholder="Task details (optional): what's involved, what to bring, where to go">${esc(s.details)}</textarea>
         ${teamSelect(s)}
@@ -541,7 +541,7 @@
       <div class="slot-edit item" data-i="${i}">
         <div class="grid item-grid">
           <div><label>Item</label><input type="text" data-k="title" value="${esc(s.title)}" placeholder="e.g. Main dish"></div>
-          <div><label>How many</label><input type="number" data-k="capacity" min="${Math.max(1, n)}" max="500" value="${esc(s.capacity)}"></div>
+          <div><label>How many${s.each_team ? ' <span class="opt">per ' + esc(T().one.toLowerCase()) + '</span>' : ''}</label><input type="number" data-k="capacity" min="${Math.max(1, s.each_team ? 1 : n)}" max="500" value="${esc(s.capacity)}"></div>
         </div>
         <textarea data-k="details" placeholder="Details (optional), e.g. serves 8, please bring in a disposable dish">${esc(s.details)}</textarea>
         ${teamSelect(s)}
@@ -559,19 +559,23 @@
       }));
       const w = $('[data-wwcc]', el);
       if (w) w.addEventListener('change', () => { s.needs_wwcc = w.checked ? 1 : 0; markDirty(); });
-      const ts = $('[data-team]', el);
-      if (ts) ts.addEventListener('change', () => {
-        const was = { each: s.each_team, team: s.team_id, id: s.id, ids: s.team_slot_ids || {} };
-        Object.assign(s, teamChoice(ts.value));
-        // keep sign-ups attached where we can when switching between "each" and one team
-        if (s.each_team && !was.each) { s.team_slot_ids = was.team && was.id ? { [was.team]: was.id } : {}; s.id = undefined; }
-        else if (!s.each_team && was.each) { s.id = s.team_id ? was.ids[s.team_id] : undefined; s.team_slot_ids = {}; s.job_key = undefined; }
+      const mode = $('[data-team-mode]', el);
+      if (mode) mode.addEventListener('change', () => {
+        if (mode.value === 'teams') { s.each_team = true; s.for_teams = null; s.team_slot_ids = {}; s.id = undefined; }
+        else { s.each_team = false; s.team_id = null; s.for_teams = null; s.team_slot_ids = {}; s.job_key = undefined; s.id = undefined; }
         markDirty(); renderSlots();
       });
+      const all = $('[data-team-all]', el);
+      if (all) all.addEventListener('change', () => { s.for_teams = all.checked ? null : []; markDirty(); renderSlots(); });
+      $$('[data-team-one]', el).forEach(c => c.addEventListener('change', () => {
+        const ids = $$('[data-team-one]', el).filter(x => x.checked).map(x => +x.value);
+        s.for_teams = ids.length === takingTeams().length ? null : ids;
+        markDirty(); renderSlots();
+      }));
       const f = $('[data-food]', el);
       if (f) f.addEventListener('change', () => { s.is_food = f.checked ? 1 : 0; markDirty(); });
       $('[data-act=copy]', el).onclick = () => {
-        current.rows.splice(+el.dataset.i + 1, 0, { ...s, id: undefined, job_key: undefined, team_slot_ids: {}, signups: [] });
+        current.rows.splice(+el.dataset.i + 1, 0, { ...s, id: undefined, job_key: undefined, team_slot_ids: {}, for_teams: s.for_teams ? [...s.for_teams] : null, signups: [] });
         markDirty(); renderSlots();
       };
       $('[data-act=remove]', el).onclick = () => { current.rows.splice(+el.dataset.i, 1); markDirty(); renderSlots(); };
@@ -579,33 +583,50 @@
   }
 
   const takingTeams = () => (teams || []).filter(t => (current.team_ids || []).includes(t.id));
+  // the teams a row is for: all teams taking part, or the ones picked
+  const targetsOf = s => s.each_team ? takingTeams().filter(t => !s.for_teams || s.for_teams.includes(t.id)) : [];
+  // options for the simple dropdown used when adding a run of shifts
   function teamOptions(s) {
-    const taking = takingTeams(), lc = T().one.toLowerCase();
-    const orphan = s.team_id && !s.each_team && !taking.some(t => t.id === Number(s.team_id)) ? (teams || []).find(t => t.id === Number(s.team_id)) : null;
+    const taking = takingTeams(), lc = T().one.toLowerCase(), one = s.each_team && s.for_teams && s.for_teams.length === 1 ? s.for_teams[0] : null;
     return `<option value="">Everyone (whole event)</option>
-      ${taking.length || s.each_team ? `<option value="each" ${s.each_team ? 'selected' : ''}>Each ${esc(lc)} taking part (${taking.length})</option>` : ''}
-      ${taking.map(t => `<option value="${t.id}" ${!s.each_team && Number(s.team_id) === t.id ? 'selected' : ''}>${esc(t.name)} only</option>`).join('')}
-      ${orphan ? `<option value="${orphan.id}" selected>${esc(orphan.name)} only (not ticked as taking part)</option>` : ''}`;
+      ${taking.length ? `<option value="each" ${s.each_team && !s.for_teams ? 'selected' : ''}>Each ${esc(lc)} taking part (${taking.length})</option>` : ''}
+      ${taking.map(t => `<option value="${t.id}" ${one === t.id ? 'selected' : ''}>${esc(t.name)} only</option>`).join('')}`;
   }
-  // what a team dropdown value means for a row
   function teamChoice(v) {
-    if (v === 'each') return { each_team: true, team_id: null };
-    return { each_team: false, team_id: v ? +v : null };
+    if (v === 'each') return { each_team: true, for_teams: null, team_id: null, team_slot_ids: {} };
+    if (v) return { each_team: true, for_teams: [+v], team_id: null, team_slot_ids: {} };
+    return { each_team: false, for_teams: null, team_id: null };
   }
+  // per-row picker: everyone, or any mix of the teams taking part
   function teamSelect(s) {
     if (!teams || !teams.length) return '';
-    return `<div class="team-pick"><label class="small muted">${esc(T().one)}</label><select data-team>${teamOptions(s)}</select></div>`;
+    const L = T(), taking = takingTeams(), picked = new Set(targetsOf(s).map(t => t.id));
+    return `<div class="team-pick"><label class="small muted">For</label>
+      <select data-team-mode><option value="">Everyone (whole event)</option><option value="teams" ${s.each_team ? 'selected' : ''}>${esc(L.many)}…</option></select></div>
+      ${s.each_team ? (taking.length ? `<div class="chip-checks team-chips-edit">
+        <label class="chip-check"><input type="checkbox" data-team-all ${!s.for_teams ? 'checked' : ''}> All taking part</label>
+        ${taking.map(t => `<label class="chip-check"><input type="checkbox" data-team-one value="${t.id}" ${picked.has(t.id) ? 'checked' : ''}> ${esc(t.name)}</label>`).join('')}
+      </div>${!picked.size ? `<p class="small" style="color:var(--bad);margin:4px 0 0">Pick at least one ${esc(L.one.toLowerCase())}.</p>` : ''}`
+        : `<p class="small muted" style="margin:4px 0 0">Tick the ${esc(L.many.toLowerCase())} taking part above first.</p>`) : ''}`;
   }
   // rows for the editor: the copies of an "each team" job show as one row
-  function collapseSlots(slots) {
+  // rows for the editor: the copies of a job for several teams show as one row
+  function collapseSlots(slots, teamIds) {
     const rows = [], byKey = {};
     for (const sl of slots || []) {
-      if (sl.job_key && sl.team_id) {
-        let r = byKey[sl.job_key];
-        if (!r) { r = byKey[sl.job_key] = { ...sl, id: undefined, team_id: null, each_team: true, team_slot_ids: {}, signups: [] }; rows.push(r); }
+      if (sl.team_id) {
+        const key = sl.job_key || 'one-' + sl.id;
+        let r = byKey[key];
+        if (!r) { r = byKey[key] = { ...sl, id: undefined, team_id: null, each_team: true, team_slot_ids: {}, signups: [], job_key: sl.job_key || undefined }; rows.push(r); }
         r.team_slot_ids[sl.team_id] = sl.id;
         r.signups = r.signups.concat(sl.signups || []);
       } else rows.push({ ...sl });
+    }
+    // a job for every team taking part stays "all" (so newly ticked teams get it too); otherwise it's the teams picked
+    const taking = new Set(teamIds || []);
+    for (const r of rows) if (r.each_team) {
+      const ids = Object.keys(r.team_slot_ids).map(Number);
+      r.for_teams = taking.size && ids.length === taking.size && ids.every(i => taking.has(i)) && ids.length > 1 ? null : ids;
     }
     return rows;
   }
@@ -648,7 +669,7 @@
       // continue straight after the previous slot, same length
       const mins = toMin(last.end_time) - toMin(last.start_time);
       next = { ...next, title: last.title, details: last.details, date: last.date, capacity: last.capacity, needs_wwcc: last.needs_wwcc ? 1 : 0,
-        ...teamChoice(last.each_team ? 'each' : String(last.team_id || '')),
+        each_team: !!last.each_team, for_teams: last.for_teams ? [...last.for_teams] : null, team_id: null, team_slot_ids: {},
         start_time: last.end_time, end_time: fromMin(Math.min(toMin(last.end_time) + (mins > 0 ? mins : 60), 23 * 60 + 55)) };
     }
     current.rows.push(next);
