@@ -909,16 +909,20 @@
     const filled = ev.slots.reduce((n, s) => n + s.signups.length, 0);
     let kind = dates.length && dates[dates.length - 1] < today ? 'thanks' : !filled ? 'new' : daysAway <= 2 ? 'final' : 'progress';
 
-    // the per-team lines added to the WhatsApp message
-    const details = style => taking.map(t => {
-      const mine = mineOf(t);
-      if (!mine.length) return `• ${t.name}: no jobs yet`;
+    // the lines added to the WhatsApp message: each team's own jobs, then jobs for everyone (e.g. things to bring)
+    const shared = future.filter(s => !s.team_id);
+    const block = (label, mine, link, style) => {
       const cap = mine.reduce((n, s) => n + s.capacity, 0), got = mine.reduce((n, s) => n + Math.min(s.capacity, s.signups.length), 0);
       const open = mine.filter(s => s.signups.length < s.capacity);
-      if (style === 'jobs') return `• ${t.name}: ${mine.map(s => `${at(s)}${s.capacity > 1 ? ` x${s.capacity}` : ''}`).join(', ')}\n  ${url(t.id)}`;
-      if (style === 'roster') return `• ${t.name}\n${mine.map(s => `  ${at(s)}: ${s.signups.length ? s.signups.map(name).join(', ') : 'nobody yet'}${s.signups.length < s.capacity && s.signups.length ? `, ${s.capacity - s.signups.length} still needed` : ''}`).join('\n')}${open.length ? `\n  ${url(t.id)}` : ''}`;
-      return `• ${t.name}: ${got} of ${cap} filled${open.length ? `. Still need: ${open.map(at).join(', ')}` : '. All done, thank you!'}${open.length ? `\n  ${url(t.id)}` : ''}`;
-    }).join('\n');
+      if (style === 'jobs') return `• ${label}: ${mine.map(s => `${at(s)}${s.capacity > 1 ? ` x${s.capacity}` : ''}`).join(', ')}\n  ${link}`;
+      if (style === 'roster') return `• ${label}\n${mine.map(s => `  ${at(s)}: ${s.signups.length ? s.signups.map(name).join(', ') : 'nobody yet'}${s.signups.length < s.capacity && s.signups.length ? `, ${s.capacity - s.signups.length} still needed` : ''}`).join('\n')}${open.length ? `\n  ${link}` : ''}`;
+      return `• ${label}: ${got} of ${cap} filled${open.length ? `. Still need: ${open.map(at).join(', ')}` : '. All done, thank you!'}${open.length ? `\n  ${link}` : ''}`;
+    };
+    const details = style => {
+      const lines = taking.filter(t => mineOf(t).length).map(t => block(t.name, mineOf(t), url(t.id), style));
+      if (shared.length) lines.push(block(`For everyone`, shared, url(null), style));
+      return lines.join('\n') || 'Nothing has been added to this event yet.';
+    };
 
     modal(`
       <h2>Send message to ${esc(roles)}</h2>

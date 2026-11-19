@@ -1047,7 +1047,8 @@ async function adminMessageManagers(request, env, ctx, group, user, id) {
   const replyTo = user.email || ev.contact_email || group.contact_email || null;
   for (const [to, m] of byEmail) {
     const sections = !withStatus ? '' : m.teams.map(t => {
-      const mine = slots.filter(sl => sl.team_id === t.id);
+      // this team's jobs plus anything for everyone (e.g. things to bring), since the manager asks their parents for both
+      const mine = slots.filter(sl => sl.team_id === t.id || !sl.team_id);
       const open = mine.filter(sl => sl.left > 0);
       const filled = mine.reduce((n, sl) => n + sl.capacity - sl.left, 0), cap = mine.reduce((n, sl) => n + sl.capacity, 0);
       const team = { id: t.id, name: t.name };
@@ -1065,7 +1066,7 @@ async function adminMessageManagers(request, env, ctx, group, user, id) {
         : style === 'jobs' ? slotListHtml(mine, 'gap', team) : slotListHtml(mine, 'roster', team);
       return `<div style="border-top:1px solid #e5e8ec;padding-top:12px;margin-top:12px">
         <div style="font-weight:bold;font-size:17px">${heading}</div>
-        ${mine.length ? list : '<p style="color:#888">No jobs for this team yet.</p>'}
+        ${mine.length ? list : '<p style="color:#888">Nothing has been added to this event yet.</p>'}
         ${mine.length ? button(wa, label, '#1f8a4c') : ''}
         <p style="margin-top:-10px;font-size:14px">Sign-up link for your team: <a href="${eventLink(env, group, ev, t.id)}" style="color:${group.accent}">${eventLink(env, group, ev, t.id)}</a></p>
         <p style="font-size:14px"><a href="${teamPageLink(env, t.page)}" style="color:${group.accent}">Your team page</a>: check your team and share updates any time.</p>
@@ -1353,17 +1354,22 @@ async function getTeamPage(env, token) {
       mine: mine.map(show),
       whole_event: slots.filter(sl => !sl.team_id).map(show),
       others: [...others.values()].filter(o => o.name),
-      messages: {
-        ask: askShareText(env, group, ev, mine, me),
-        gaps: mine.some(sl => sl.left > 0) ? gapShareText(env, group, ev, mine.filter(sl => sl.left > 0), me) : null,
-        roster: mine.some(sl => sl.people.length) ? rosterShareText(env, group, ev, mine, me) : null,
-      },
+      // messages cover this team's jobs and anything for everyone (e.g. things to bring)
+      messages: (() => {
+        const rel = slots.filter(sl => sl.team_id === team.id || !sl.team_id);
+        return {
+          ask: askShareText(env, group, ev, rel, me),
+          gaps: rel.some(sl => sl.left > 0) ? gapShareText(env, group, ev, rel.filter(sl => sl.left > 0), me) : null,
+          roster: rel.some(sl => sl.people.length) ? rosterShareText(env, group, ev, rel, me) : null,
+        };
+      })(),
     });
   }
   return json({
     group: publicGroup(env, group),
     team: { name: team.name, manager_name: team.manager_name },
     role: TEAM_LABELS[teamLabel(group)],
+    label: teamLabel(group).replace('_', ' '),
     contact: { name: group.contact_name, email: group.contact_email },
     events: out,
   });

@@ -45,23 +45,24 @@
           <h1>${esc(data.team.name)}</h1>
           <p class="lead">${data.team.manager_name ? `Hi ${esc(data.team.manager_name.split(' ')[0])}! ` : ''}Here's how your volunteers are tracking. Use the buttons to share a ready-made message in your WhatsApp chat.</p>
           ${data.events.length ? data.events.map(e => {
-            const cap = e.mine.reduce((n, s) => n + s.capacity, 0), filled = e.mine.reduce((n, s) => n + s.capacity - s.left, 0);
+            const all = e.mine.concat(e.whole_event);
+            const cap = all.reduce((n, s) => n + s.capacity, 0), filled = all.reduce((n, s) => n + s.capacity - s.left, 0);
             return `
             <div class="card" style="margin-bottom:16px">
               <h2 style="margin:0">${esc(e.title)}</h2>
               <div class="muted small">${esc(fmtRange(e.first_date, e.last_date))}${e.location ? ' · ' + esc(e.location) : ''}</div>
-              <div class="tally"><b>${filled} of ${cap}</b> ${esc(data.team.name)} spot${cap === 1 ? '' : 's'} filled
+              <div class="tally"><b>${filled} of ${cap}</b> spot${cap === 1 ? '' : 's'} filled
                 <div class="bar"><i style="width:${cap ? Math.round(filled / cap * 100) : 0}%"></i></div></div>
-              ${e.mine.length ? `<ul class="team-slots">${e.mine.map(s => `<li>${slotLine(s)}<br>${people(s)}</li>`).join('')}</ul>`
-                : '<p class="muted">No jobs for your team in this event.</p>'}
+              ${e.mine.length ? `<ul class="team-slots">${e.mine.map(s => `<li>${slotLine(s)}<br>${people(s)}</li>`).join('')}</ul>` : ''}
+              ${e.whole_event.length ? `<div class="small" style="font-weight:600;margin-top:12px">For everyone</div><ul class="team-slots">${e.whole_event.map(s => `<li>${slotLine(s)}<br>${people(s)}</li>`).join('')}</ul>` : ''}
+              ${!e.mine.length && !e.whole_event.length ? '<p class="muted">Nothing has been added to this event yet.</p>' : ''}
               <div class="small" style="font-weight:600;margin-top:12px">Post to the ${esc(data.team.name)} WhatsApp group</div>
               <div class="share-row">${MESSAGES.map(([k, label, hint]) => e.messages[k]
                 ? `<button class="btn small ${k === 'ask' ? 'wa' : 'secondary'}" data-ev="${e.id}" data-msg="${k}" title="${esc(hint)}">${esc(label)}</button>` : '').join('')}
                 <button class="btn small secondary" data-copy="${esc(e.link)}">Copy sign-up link</button>
               </div>
-              ${e.whole_event.length || e.others.length ? `<details style="margin-top:12px"><summary class="small">Rest of the event</summary>
-                ${e.others.length ? `<p class="small" style="margin:8px 0 4px">${e.others.map(o => `${esc(o.name)}: ${o.filled} of ${o.capacity}`).join(' · ')}</p>` : ''}
-                ${e.whole_event.length ? `<div class="small muted" style="margin-top:6px">Jobs for everyone</div><ul class="team-slots small">${e.whole_event.map(s => `<li>${slotLine(s)}<br>${people(s)}</li>`).join('')}</ul>` : ''}
+              ${e.others.length ? `<details style="margin-top:12px"><summary class="small">Other ${esc(data.label || 'teams')}</summary>
+                <p class="small" style="margin:8px 0 4px">${e.others.map(o => `${esc(o.name)}: ${o.filled} of ${o.capacity}`).join(' · ')}</p>
               </details>` : ''}
             </div>`;
           }).join('') : `<div class="card center"><p><strong>No upcoming events for ${esc(data.team.name)} right now.</strong></p><p class="muted">When your team is added to an event, it'll show up here.</p></div>`}
