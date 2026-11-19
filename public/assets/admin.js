@@ -167,9 +167,9 @@
       </div>
       ${ev.archived ? `<div class="notice" style="margin-top:10px">This event is archived: volunteers can't see it and no reminders or updates are sent. <button class="btn small secondary" id="unarchive" style="margin-left:6px">Restore</button></div>` : ''}
       ${saved ? `<div class="toolbar" style="margin-top:12px">
-        <button class="btn small wa" id="share">Share on WhatsApp</button>
+        <button class="btn small wa" id="share">Post to a WhatsApp group</button>
         ${(ev.team_ids || []).length ? `<button class="btn secondary small" id="managers">Message ${esc(T().role)}s</button>` : ''}
-        <button class="btn secondary small" id="mail">Email volunteers</button>
+        <button class="btn secondary small" id="mail">Email people signed up</button>
         <button class="btn secondary small" id="print">Print sign-in sheet</button>
         <div class="menu-wrap">
           <button class="btn secondary small" id="more" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
@@ -404,7 +404,7 @@
       ${dates.length < 3 ? `<button class="btn secondary small" data-sched-add="${kind}" style="margin-top:8px">+ Add a date</button>` : ''}`;
     };
     box.innerHTML = `
-      <p class="small muted" style="margin:0">Emailed to the people you tick here. Use Share on WhatsApp at the top of the event to share any time.</p>
+      <p class="small muted" style="margin:0">Emailed to the people you tick here. Use "Post to a WhatsApp group" at the top of the event to share any time.</p>
       <div style="margin-top:12px;padding-bottom:12px;border-bottom:1px solid var(--line)">
         <div class="small" style="font-weight:600">Who gets these updates</div>
         ${organisers === null ? '<p class="small muted" style="margin:4px 0 0">Loading organisers…</p>'
@@ -499,7 +499,8 @@
     const evTeams = (teams || []).filter(t => ev.slots.some(s => Number(s.team_id) === t.id));
     if (!ev.published) toast('This event is a draft. Tick "Live" and save so people can sign up.', 'bad');
     modal(`
-      <h2>Share on WhatsApp</h2>
+      <h2>Post to a WhatsApp group</h2>
+      <p class="small muted" style="margin-top:-6px">Pick a ready-made message, then choose which group chat to post it in.</p>
       ${evTeams.length ? `<label for="share-team" style="margin-top:0">Who is it for?</label>
       <select id="share-team"><option value="">Everyone (all ${esc(T().many.toLowerCase())})</option>${evTeams.map(t => `<option value="${t.id}">${esc(t.name)} only</option>`).join('')}</select>
       <p class="small muted" style="margin:4px 0 10px">Pick one to share just their jobs in their own chat. The link then shows only their slots (plus any for everyone).</p>` : ''}
@@ -916,6 +917,7 @@
 
     modal(`
       <h2>Message ${esc(roles)}</h2>
+      <p class="small muted" style="margin:-6px 0 8px">Email each ${esc(role)} their own ${esc(lc)}'s details, or post one update in your ${esc(roles)}' group chat.</p>
       <p class="small muted" style="margin-top:0">${withEmail.length} of ${taking.length} ${esc(L.many.toLowerCase())} taking part have an email for their ${esc(role)}${without.length ? ` (missing: ${esc(without.map(t => t.name).join(', '))}; add them on the ${esc(L.many)} tab)` : ''}.</p>
       <div class="choice" role="radiogroup" aria-label="What kind of message?">${Object.entries(KINDS).map(([k, v]) => `
         <label class="choice-item"><input type="radio" name="mm-kind" value="${k}" ${k === kind ? 'checked' : ''}>
@@ -980,7 +982,8 @@
     try { status = await call(A + '/status'); } catch { return; }
     const people = new Set(ev.slots.flatMap(s => s.signups.map(g => g.email.toLowerCase())));
     modal(`
-      <h2>Email volunteers</h2>
+      <h2>Email people signed up</h2>
+      <p class="small muted" style="margin-top:-6px">Sends an email to the volunteers who've already signed up for this event.</p>
       <label>Send to</label>
       <select id="m-to"><option value="">Everyone signed up (${people.size} ${people.size === 1 ? 'person' : 'people'})</option>
         ${ev.slots.filter(s => s.signups.length).map(s => `<option value="${s.id}">Only: ${s.kind === 'item' ? 'Bring: ' + esc(slotName(s)) : `${esc(fmtDateShort(s.date))} ${fmtTime(s.start_time)}, ${esc(slotName(s))}`} (${s.signups.length})</option>`).join('')}</select>

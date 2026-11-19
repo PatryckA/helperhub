@@ -54,7 +54,7 @@
                 <div class="bar"><i style="width:${cap ? Math.round(filled / cap * 100) : 0}%"></i></div></div>
               ${e.mine.length ? `<ul class="team-slots">${e.mine.map(s => `<li>${slotLine(s)}<br>${people(s)}</li>`).join('')}</ul>`
                 : '<p class="muted">No jobs for your team in this event.</p>'}
-              <div class="small" style="font-weight:600;margin-top:12px">Share on WhatsApp</div>
+              <div class="small" style="font-weight:600;margin-top:12px">Post to the ${esc(data.team.name)} WhatsApp group</div>
               <div class="share-row">${MESSAGES.map(([k, label, hint]) => e.messages[k]
                 ? `<button class="btn small ${k === 'ask' ? 'wa' : 'secondary'}" data-ev="${e.id}" data-msg="${k}" title="${esc(hint)}">${esc(label)}</button>` : '').join('')}
                 <button class="btn small secondary" data-copy="${esc(e.link)}">Copy sign-up link</button>

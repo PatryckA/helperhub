@@ -1492,7 +1492,7 @@ async function queueGapAlerts(env) {
         <div style="border-top:1px solid #e5e8ec;padding-top:12px;margin-top:12px">
           ${many ? `<div style="font-weight:bold;font-size:17px">${esc(x.title)}</div>` : ''}
           ${x.html}
-          ${button(x.wa, 'Share on WhatsApp', '#1f8a4c')}
+          ${button(x.wa, 'Post to a WhatsApp group', '#1f8a4c')}
           ${x.admin ? `<p style="margin-top:-10px"><a href="${x.admin}" style="color:${box.group.accent}">See who's signed up</a></p>` : ''}
           ${x.page ? `<p style="margin-top:-10px"><a href="${x.page}" style="color:${box.group.accent}">Your team page</a>: check your team and share updates any time</p>` : ''}
         </div>`).join('');
