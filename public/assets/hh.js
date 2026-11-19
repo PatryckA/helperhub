@@ -16,11 +16,11 @@
   };
   // Kinds of group, with the word used for the settings tab. Keys match GROUP_KINDS in the worker.
   window.GROUP_KINDS = {
-    school:    { label: 'P&C (Parents and Citizens)', settings: 'P&C settings', organisers: 'P&C organisers' },
-    parents:   { label: "P&F, parents' club or school council", settings: 'School settings', organisers: 'School organisers' },
-    sport:     { label: 'Sports club', settings: 'Club settings', organisers: 'Club organisers' },
-    community: { label: 'Community group or charity', settings: 'Group settings', organisers: 'Group organisers' },
-    other:     { label: 'Other', settings: 'Group settings', organisers: 'Group organisers' },
+    school:    { label: 'P&C (Parents and Citizens)', settings: 'P&C settings', organisers: 'P&C organisers', people: 'parents' },
+    parents:   { label: "P&F, parents' club or school council", settings: 'School settings', organisers: 'School organisers', people: 'parents' },
+    sport:     { label: 'Sports club', settings: 'Club settings', organisers: 'Club organisers', people: 'parents' },
+    community: { label: 'Community group or charity', settings: 'Group settings', organisers: 'Group organisers', people: 'volunteers' },
+    other:     { label: 'Other', settings: 'Group settings', organisers: 'Group organisers', people: 'volunteers' },
   };
   window.kindInfo = g => GROUP_KINDS[g && g.kind] || GROUP_KINDS.other;
   window.teamTerms = g => TEAM_LABELS[g && g.team_label] || TEAM_LABELS.teams;

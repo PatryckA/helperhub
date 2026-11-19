@@ -166,10 +166,15 @@
         ${saved ? (ev.archived ? '<span class="badge archived">Archived</span>' : ev.published ? '<span class="badge">Live</span>' : '<span class="badge draft">Draft</span>') : ''}
       </div>
       ${ev.archived ? `<div class="notice" style="margin-top:10px">This event is archived: volunteers can't see it and no reminders or updates are sent. <button class="btn small secondary" id="unarchive" style="margin-left:6px">Restore</button></div>` : ''}
-      ${saved ? `<div class="toolbar" style="margin-top:12px">
-        <button class="btn small wa" id="share">Post to a WhatsApp group</button>
-        ${(ev.team_ids || []).length ? `<button class="btn secondary small" id="managers">Message ${esc(T().role)}s</button>` : ''}
-        <button class="btn secondary small" id="mail">Email people signed up</button>
+      ${saved ? `<div class="action-list" style="margin-top:12px">
+        ${(ev.team_ids || []).length ? `<button class="action-row" id="managers"><strong>Message ${esc(T().role)}s</strong>
+          <span>Email each ${esc(T().role)} their ${esc(T().one.toLowerCase())}'s progress, or post an update in your ${esc(T().role)}s' group chat</span></button>` : ''}
+        <button class="action-row wa" id="share"><strong>Post to ${esc(kindInfo(group).people)}' WhatsApp group</strong>
+          <span>A ready-made message asking for helpers, with the sign-up link</span></button>
+        <button class="action-row" id="mail"><strong>Email people signed up</strong>
+          <span>Send a message to everyone already volunteering for this event</span></button>
+      </div>
+      <div class="toolbar" style="margin-top:10px">
         <button class="btn secondary small" id="print">Print sign-in sheet</button>
         <div class="menu-wrap">
           <button class="btn secondary small" id="more" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
@@ -499,7 +504,7 @@
     const evTeams = (teams || []).filter(t => ev.slots.some(s => Number(s.team_id) === t.id));
     if (!ev.published) toast('This event is a draft. Tick "Live" and save so people can sign up.', 'bad');
     modal(`
-      <h2>Post to a WhatsApp group</h2>
+      <h2>Post to ${esc(kindInfo(group).people)}' WhatsApp group</h2>
       <p class="small muted" style="margin-top:-6px">Pick a ready-made message, then choose which group chat to post it in.</p>
       ${evTeams.length ? `<label for="share-team" style="margin-top:0">Who is it for?</label>
       <select id="share-team"><option value="">Everyone (all ${esc(T().many.toLowerCase())})</option>${evTeams.map(t => `<option value="${t.id}">${esc(t.name)} only</option>`).join('')}</select>

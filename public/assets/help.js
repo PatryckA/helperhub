@@ -38,7 +38,7 @@
       { done: events.some(e => e.published), go: '',
         text: `<strong>Make it live.</strong> Tick <em>Live</em> at the top of the event and save. Until then it's a draft only organisers can see.` },
       { done: false, go: null,
-        text: `<strong>Share it.</strong> Open the event and tap <em>Post to a WhatsApp group</em> for a ready-made message with the sign-up link.` },
+        text: `<strong>Share it.</strong> Open the event and tap <em>Post to ${kindInfo(ctx.group).people}' WhatsApp group</em> for a ready-made message with the sign-up link.` },
     ];
     const started = `
       ${li(steps.map((s, i) => `<span class="help-tick ${s.done ? 'on' : ''}" aria-label="${s.done ? 'Done' : 'To do'}">${s.done ? '✓' : i + 1}</span>
@@ -106,7 +106,7 @@
     };
 
     const timeline = li([
-      `<strong>3 to 4 weeks before:</strong> create the event (or <em>Copy event</em>), tick <em>Live</em>, then <em>Post to a WhatsApp group</em> → <em>Ask for helpers</em>.${hasTeams ? ` Use <em>Message ${roles}</em> → <em>New event</em> so each ${role} asks their own parents.` : ''}`,
+      `<strong>3 to 4 weeks before:</strong> create the event (or <em>Copy event</em>), tick <em>Live</em>, then <em>Post to ${kindInfo(ctx.group).people}' WhatsApp group</em> → <em>Ask for helpers</em>.${hasTeams ? ` Use <em>Message ${roles}</em> → <em>New event</em> so each ${role} asks their own parents.` : ''}`,
       `<strong>1 to 2 weeks before:</strong> check <em>Filled</em> on the Events page. Share <em>Fill the gaps</em>${hasTeams ? ` or send ${roles} a <em>Progress update</em>` : ''}.`,
       `<strong>3 days before:</strong> if spots are still empty, you'll get an email automatically with a button to share the gaps.`,
       `<strong>The day before:</strong> you'll get a "who's doing what" email. Volunteers get their own reminder automatically.${hasTeams ? ` A <em>Final reminder</em> to ${roles} helps catch last-minute gaps.` : ''}`,
@@ -119,7 +119,7 @@
       ['Can I change a slot after people have signed up?', `Yes, you can change the time, details or numbers. You can't delete a slot that still has volunteers, so remove them first.`],
       ['A volunteer says they didn\'t get an email.', `Ask them to check their junk or spam folder. You can always see who's signed up on the <em>Volunteers</em> tab.`],
       ['Who can see volunteers\' details?', `Only organisers. Everyone else, including ${roles}, only sees first names and last initials.`],
-      ['How do I share the sign-up link?', `Open the event and tap <em>Post to a WhatsApp group</em>, or <em>More</em> → <em>Copy volunteer link</em> to paste it anywhere.`],
+      ['How do I share the sign-up link?', `Open the event and tap <em>Post to ${kindInfo(ctx.group).people}' WhatsApp group</em>, or <em>More</em> → <em>Copy volunteer link</em> to paste it anywhere.`],
       [`Does every event need ${many}?`, `No. ${cap(many)} are optional. Without them, every slot is simply for everyone.`],
     ]);
 
