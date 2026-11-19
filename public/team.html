@@ -20,7 +20,7 @@
     const token = new URLSearchParams(location.search).get('t') || '';
     const MESSAGES = [
       ['ask', 'Ask for helpers', 'Everything your team still needs'],
-      ['gaps', 'Fill the gaps', 'A short follow-up for empty spots'],
+      ['gaps', 'Fill the gaps', 'A short follow-up for jobs that still need helpers'],
       ['roster', "Who's doing what", 'Thanks everyone and shows who signed up'],
     ];
 
@@ -34,7 +34,7 @@
       try {
         const data = await api('/api/team/' + encodeURIComponent(token));
         groupHeader(data.group); siteFooter(data.group);
-        document.body.insertAdjacentHTML('beforeend', '<button type="button" class="help-fab" id="help-fab" aria-label="Help and guidance"><span aria-hidden="true">?</span> Help</button>');
+        document.body.insertAdjacentHTML('beforeend', '<button type="button" class="help-fab" id="help-fab" aria-label="Help and guidance"><span aria-hidden="true">?</span> <b class="lbl">Help</b></button>');
         $('#help-fab').onclick = () => { HHHelp.manager({ group: data.group, team: data.team.name, role: data.role,
           contact: data.contact.email ? `<a href="mailto:${esc(data.contact.email)}">${esc(data.contact.name || data.contact.email)}</a>` : '' }); };
         // first visit: show the guide once
@@ -51,7 +51,7 @@
             <div class="card" style="margin-bottom:16px">
               <h2 style="margin:0">${esc(e.title)}</h2>
               <div class="muted small">${esc(fmtRange(e.first_date, e.last_date))}${e.location ? ' · ' + esc(e.location) : ''}</div>
-              <div class="tally"><b>${filled} of ${cap}</b> spot${cap === 1 ? '' : 's'} filled
+              <div class="tally"><b>${filled} of ${cap}</b> helper${cap === 1 ? '' : 's'} signed up
                 <div class="bar"><i style="width:${cap ? Math.round(filled / cap * 100) : 0}%"></i></div></div>
               ${e.mine.length ? `<ul class="team-slots">${e.mine.map(s => `<li>${slotLine(s)}<br>${people(s)}</li>`).join('')}</ul>` : ''}
               ${e.whole_event.length ? `<div class="small" style="font-weight:600;margin-top:12px">For everyone</div><ul class="team-slots">${e.whole_event.map(s => `<li>${slotLine(s)}<br>${people(s)}</li>`).join('')}</ul>` : ''}

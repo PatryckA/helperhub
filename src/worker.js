@@ -793,7 +793,7 @@ async function adminSaveEvent(request, env, group, id) {
   if (!slots.length) throw httpError(400, taking.length || !(body.slots || []).some(s => s.each_team)
     ? 'Add at least one time slot or item.' : 'Tick the teams taking part, so the "each team" jobs can be created.');
   const lastDate = slots.reduce((m, s) => s.date > m ? s.date : m, '');
-  if (ev.gap_alerts && ev.gap_alerts.split(',').some(d => d > lastDate)) throw httpError(400, 'Unfilled spot alert dates must be on or before the event.');
+  if (ev.gap_alerts && ev.gap_alerts.split(',').some(d => d > lastDate)) throw httpError(400, 'Empty job alert dates must be on or before the event.');
   if (ev.roster_alerts && ev.roster_alerts.split(',').some(d => d > lastDate)) throw httpError(400, "\"Who's doing what\" dates must be on or before the event.");
 
   const stmts = [];
@@ -849,9 +849,11 @@ async function adminArchive(request, env, group, id) {
 // Archive every event whose slots have all finished
 async function adminArchivePast(env, group) {
   const today = new Date().toISOString().slice(0, 10);
-  const r = await env.DB.prepare(`UPDATE events SET archived = 1 WHERE group_id = ? AND archived = 0
-    AND EXISTS (SELECT 1 FROM slots WHERE event_id = events.id) AND (SELECT MAX(date) FROM slots WHERE event_id = events.id) < ?`).bind(group.id, today).run();
-  return json({ ok: true, archived: r.meta.changes || 0 });
+  const { results } = await env.DB.prepare(`SELECT id FROM events WHERE group_id = ? AND archived = 0
+    AND EXISTS (SELECT 1 FROM slots WHERE event_id = events.id) AND (SELECT MAX(date) FROM slots WHERE event_id = events.id) < ?`).bind(group.id, today).all();
+  const ids = results.map(r => r.id);
+  if (ids.length) await env.DB.batch(ids.map(id => env.DB.prepare(`UPDATE events SET archived = 1 WHERE id = ? AND group_id = ?`).bind(id, group.id)));
+  return json({ ok: true, archived: ids.length, ids });
 }
 
 async function adminDeleteEvent(env, group, id) {
@@ -1061,7 +1063,7 @@ async function adminMessageManagers(request, env, ctx, group, user, id) {
       const wa = `https://wa.me/?text=${encodeURIComponent(text)}`;
       const heading = style === 'jobs'
         ? `${esc(t.name)}: ${cap} helper${cap === 1 ? '' : 's'} needed`
-        : `${esc(t.name)}: ${filled} of ${cap} spot${cap === 1 ? '' : 's'} filled`;
+        : `${esc(t.name)}: ${filled} of ${cap} helper${cap === 1 ? '' : 's'} signed up`;
       const list = style === 'gaps' ? (open.length ? slotListHtml(open, 'gap', team) : '<p style="color:#15803d">All filled, thank you!</p>')
         : style === 'jobs' ? slotListHtml(mine, 'gap', team) : slotListHtml(mine, 'roster', team);
       return `<div style="border-top:1px solid #e5e8ec;padding-top:12px;margin-top:12px">
@@ -1230,8 +1232,8 @@ function readGapAlerts(v) {
   if (v === null || v === undefined) return null;
   if (!Array.isArray(v)) throw httpError(400, 'Invalid alert dates.');
   const dates = [...new Set(v.map(d => String(d || '').trim()).filter(Boolean))].sort();
-  if (dates.length > 3) throw httpError(400, 'You can set up to 3 unfilled spot alerts.');
-  if (dates.some(d => !/^\d{4}-\d{2}-\d{2}$/.test(d))) throw httpError(400, 'Please pick a date for each unfilled spot alert.');
+  if (dates.length > 3) throw httpError(400, 'You can set up to 3 empty job alerts.');
+  if (dates.some(d => !/^\d{4}-\d{2}-\d{2}$/.test(d))) throw httpError(400, 'Please pick a date for each empty job alert.');
   return dates.join(',');
 }
 
@@ -1295,7 +1297,7 @@ function rosterShareText(env, group, ev, slots, team) {
   if (shifts.length) parts.push(shifts.map(s => `*${slotLabel(s, team)}*, ${slotWhen(s)}\n${who(s)}`).join('\n\n'));
   if (items.length) parts.push(`*Things to bring* (drop off by ${shortTime(ev.dropoff_time)} ${shortDate(ev.dropoff_date)}${ev.dropoff_note ? ', ' + ev.dropoff_note : ''})\n`
     + items.map(s => `• ${slotLabel(s, team)}: ${who(s)}`).join('\n'));
-  parts.push(slots.some(s => s.left > 0) ? `Spots still free: ${eventLink(env, group, ev, team?.id)}` : 'All spots are filled. See you there!');
+  parts.push(slots.some(s => s.left > 0) ? `Sign up here: ${eventLink(env, group, ev, team?.id)}` : 'Everything is covered. See you there!');
   return parts.join('\n\n');
 }
 
@@ -1490,10 +1492,10 @@ async function queueGapAlerts(env) {
       const total = secs.reduce((n, x) => n + x.total, 0);
       const many = secs.length > 1;
       const subject = kind === 'gap'
-        ? `${total} spot${total === 1 ? '' : 's'} still to fill: ${many ? `${secs.length} events` : secs[0].title}`
+        ? `${total} helper${total === 1 ? '' : 's'} still needed: ${many ? `${secs.length} events` : secs[0].title}`
         : `Who's doing what: ${many ? `${secs.length} events` : secs[0].title}`;
       const intro = kind === 'gap'
-        ? `<p>${many ? 'These events still have' : `<strong>${esc(secs[0].title)}</strong> still has`} empty spots${many ? '' : ':'}</p>`
+        ? `<p>${many ? 'These events still have' : `<strong>${esc(secs[0].title)}</strong> still has`} jobs that need helpers${many ? '' : ':'}</p>`
         : `<p>Here's who's helping${many ? '' : ` ${secs[0].lead}`}:</p>`;
       const body = secs.map(x => `
         <div style="border-top:1px solid #e5e8ec;padding-top:12px;margin-top:12px">

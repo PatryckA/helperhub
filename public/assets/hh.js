@@ -58,13 +58,20 @@
   window.fmtTime = t => { let [h, m] = t.split(':').map(Number); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return m ? `${h}:${String(m).padStart(2, '0')}${ap}` : `${h}${ap}`; };
   window.fmtRange = (a, b) => (!a ? '' : a === b ? fmtDate(a) : `${fmtDateShort(a)} to ${fmtDateShort(b)}`);
 
-  window.toast = function (msg, type = 'ok') {
+  // action: optional { label, onClick } shown as a button (e.g. Undo); the toast then stays a little longer
+  window.toast = function (msg, type = 'ok', action, ms) {
     let el = $('#toast');
-    if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
+    if (!el) { el = document.createElement('div'); el.id = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
     el.className = 'toast show ' + type;
     el.textContent = msg;
+    if (action) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'toast-action'; b.textContent = action.label;
+      b.onclick = () => { el.className = 'toast'; clearTimeout(el._t); action.onClick(); };
+      el.appendChild(b);
+    }
     clearTimeout(el._t);
-    el._t = setTimeout(() => (el.className = 'toast'), 3500);
+    el._t = setTimeout(() => (el.className = 'toast'), ms || (action ? 6000 : 3500));
   };
 
   /** Apply a group's colour, choosing dark or light text so it stays readable */
@@ -85,13 +92,21 @@
   };
 
   /** Group-branded header */
-  window.groupHeader = function (group, extraNav = '') {
+  // subtitle: shown under the group name (e.g. "Organiser view"); public pages have none
+  window.groupHeader = function (group, extraNav = '', subtitle = '') {
     applyAccent(group.accent);
     const h = $('#site-header');
     if (!h) return;
-    h.innerHTML = `<div class="wrapline"><a href="/${esc(group.slug)}" class="brand">${group.logo_url ? `<img src="${esc(group.logo_url)}" alt="">` : ''}<span>${esc(group.name)}<small>Volunteers</small></span></a>
+    h.innerHTML = `<div class="wrapline"><a href="/${esc(group.slug)}" class="brand">${group.logo_url ? `<img src="${esc(group.logo_url)}" alt="">` : ''}<span>${esc(group.name)}${subtitle ? `<small>${esc(subtitle)}</small>` : ''}</span></a>
       <nav class="nav">${extraNav}</nav></div>`;
   };
+
+  // the Help button shrinks to a round "?" once the page is scrolled, so it covers less
+  let fabTick = false;
+  window.addEventListener('scroll', () => {
+    if (fabTick) return; fabTick = true;
+    requestAnimationFrame(() => { fabTick = false; const f = document.getElementById('help-fab'); if (f) f.classList.toggle('compact', window.scrollY > 120); });
+  }, { passive: true });
 
   window.siteFooter = function (group) {
     const f = document.createElement('footer');

@@ -40,7 +40,7 @@
         <input id="mobile" name="mobile" type="tel" autocomplete="tel" inputmode="tel" placeholder="0412 345 678" required>
         <div id="wwcc-box" class="hidden item-block" style="margin-top:16px">
           <label style="margin-top:10px">Working with Children Check</label>
-          <p class="small muted" style="margin:0 0 4px">Needed for some of the slots you picked. For example a NSW WWCC, Queensland Blue Card or NT Ochre Card. Only the organisers see this.</p>
+          <p class="small muted" style="margin:0 0 4px">Needed for some of the jobs you picked. For example a NSW WWCC, Queensland Blue Card or NT Ochre Card. Only the organisers see this.</p>
           <div class="row">
             <div><label for="wwcc_number">Check number</label><input id="wwcc_number" name="wwcc_number" type="text" autocapitalize="characters" autocomplete="off" maxlength="25"></div>
             <div><label for="wwcc_expiry">Expiry date</label><input id="wwcc_expiry" name="wwcc_expiry" type="date"></div>
@@ -53,7 +53,7 @@
         <label class="check"><input type="checkbox" id="remember" checked> Remember my details on this device</label>
         <div id="form-error"></div>
         <button class="btn block" type="submit" id="submit" style="margin-top:16px">Confirm sign-up</button>
-        <p class="small muted center">Your contact details are only shared with the event organisers. Other volunteers just see your first name and last initial.</p>
+        <p class="small muted center">Your contact details are only shared with the event organisers. Other helpers just see your first name and last initial.</p>
       </form>
     </div>
     <div id="done-view" class="hidden"></div>
@@ -89,16 +89,26 @@
       const items = visible.filter(s => s.kind === 'item');
       for (const s of shifts) (byDate[s.date] ||= []).push(s);
       const anyOpen = visible.some(s => !s.closed && s.filled < s.capacity);
+      // the event at a glance: when, where, what, and how to sign up (no extra click needed)
+      const allShifts = event.slots.filter(s => s.kind !== 'item');
+      const dates = [...new Set(allShifts.map(s => s.date))].sort();
+      const when = dates.length === 1
+        ? `${fmtDate(dates[0])}, ${fmtTime(allShifts.map(s => s.start_time).sort()[0])} to ${fmtTime(allShifts.map(s => s.end_time).sort().pop())}`
+        : dates.length ? fmtRange(dates[0], dates[dates.length - 1]) : event.dropoff_date ? fmtDate(event.dropoff_date) : '';
       box.innerHTML = `
-        <h1>${esc(event.title)}</h1>
-        ${event.location ? `<p class="muted" style="margin:0">📍 ${esc(event.location)}</p>` : ''}
-        ${event.description ? `<p>${nl2br(event.description)}</p>` : ''}
+        <div class="event-summary">
+          <h1>${esc(event.title)}</h1>
+          ${when ? `<p class="meta"><span aria-hidden="true">📅</span> ${esc(when)}</p>` : ''}
+          ${event.location ? `<p class="meta"><span aria-hidden="true">📍</span> ${esc(event.location)}</p>` : ''}
+          ${event.description ? `<p class="desc">${nl2br(event.description)}</p>` : ''}
+          ${anyOpen ? `<p class="how"><strong>How to help:</strong> tap the jobs${items.length ? ' and things to bring' : ''} you can do below, then press <strong>Sign up</strong>.</p>` : ''}
+        </div>
         ${teams.length > 1 ? `<div class="team-chips" role="group" aria-label="Show jobs for">
           <span class="small muted">Show:</span>
           <button type="button" class="chip${teamFilter ? '' : ' on'}" data-team="">All ${esc(teamTerms(group).many.toLowerCase())}</button>
           ${teams.map(t => `<button type="button" class="chip${teamFilter === t.id ? ' on' : ''}" data-team="${t.id}">${esc(t.name)}</button>`).join('')}
         </div>` : ''}
-        <p class="small muted">${anyOpen ? 'Tap everything you can help with, then press <strong>Sign up</strong>.' : 'Everything is covered. Thank you to all our volunteers!'}</p>
+        ${anyOpen ? '' : '<p class="success">Everything is covered. Thank you to all our helpers!</p>'}
         ${items.length ? `
           <div class="day-heading">Things to bring</div>
           ${event.dropoff_date ? `<p class="small" style="margin:-4px 0 10px">Please drop off by <strong>${fmtTime(event.dropoff_time)}, ${esc(fmtDate(event.dropoff_date))}</strong>${event.dropoff_note ? ` · ${esc(event.dropoff_note)}` : ''}</p>` : ''}
@@ -130,7 +140,7 @@
       const full = s.filled >= s.capacity;
       const left = s.capacity - s.filled;
       const disabled = full || s.closed;
-      const status = s.closed ? 'Closed' : full ? 'Full, thank you!' : `${left} of ${s.capacity} spot${s.capacity === 1 ? '' : 's'} left`;
+      const status = needText(s, 'Full, thank you!');
       return `
         <div class="card slot${disabled ? ' disabled' : ''}" data-id="${s.id}" ${disabled ? '' : 'tabindex="0" role="checkbox" aria-checked="false"'}>
           <span class="tick" aria-hidden="true">${disabled ? '' : ''}</span>
@@ -140,10 +150,18 @@
             ${s.details ? `<div class="details">${nl2br(s.details)}</div>` : ''}
             ${s.needs_wwcc ? '<div style="margin-top:6px"><span class="badge draft">Working with Children Check needed</span></div>' : ''}
             <div class="fill">${status}</div>
-            <div class="bar"><i style="width:${Math.min(100, (s.filled / s.capacity) * 100)}%"></i></div>
+            ${s.filled ? `<div class="bar"><i style="width:${Math.min(100, (s.filled / s.capacity) * 100)}%"></i></div>` : ''}
             ${s.names.length ? `<div class="names">${s.names.map(n => `<span>${esc(n)}</span>`).join('')}</div>` : ''}
           </div>
         </div>`;
+    }
+
+    // "4 needed" before anyone signs up, then "1 more needed", then the full message
+    function needText(s, fullMsg) {
+      const left = s.capacity - s.filled;
+      if (s.closed) return 'Closed';
+      if (left <= 0) return fullMsg;
+      return s.filled ? `${left} more needed` : `${left} needed`;
     }
 
     function donateHtml() {
@@ -158,7 +176,7 @@
       const full = s.filled >= s.capacity;
       const left = s.capacity - s.filled;
       const disabled = full || s.closed;
-      const status = s.closed ? 'Closed' : full ? 'All covered, thank you!' : `${left} of ${s.capacity} still needed`;
+      const status = needText(s, 'All covered, thank you!');
       return `
         <div class="card slot${disabled ? ' disabled' : ''}" data-id="${s.id}" ${disabled ? '' : 'tabindex="0" role="checkbox" aria-checked="false"'}>
           <span class="tick" aria-hidden="true"></span>
@@ -166,7 +184,7 @@
             <div class="title">${s.team_name ? `<span class="team-tag">${esc(s.team_name)}</span> ` : ''}${esc(s.title)}</div>
             ${s.details ? `<div class="details">${nl2br(s.details)}</div>` : ''}
             <div class="fill">${status}</div>
-            <div class="bar"><i style="width:${Math.min(100, (s.filled / s.capacity) * 100)}%"></i></div>
+            ${s.filled ? `<div class="bar"><i style="width:${Math.min(100, (s.filled / s.capacity) * 100)}%"></i></div>` : ''}
             ${s.entries && s.entries.length ? `<ul class="bringing">${s.entries.map(e => `<li>${e.item ? `<strong>${esc(e.item)}</strong> <span class="muted">from ${esc(e.name)}</span>` : `<strong>${esc(e.name)}</strong>`}${e.dietary.length ? ` ${e.dietary.map(d => `<span class="diet">${esc(d)}</span>`).join('')}` : ''}</li>`).join('')}</ul>` : ''}
           </div>
         </div>`;

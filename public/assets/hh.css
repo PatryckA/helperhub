@@ -328,3 +328,28 @@ body:has(.modal-backdrop) .help-fab { display: none; }
 /* Teams tab: keep the share button on one line */
 .slot-edit .foot { flex-wrap: wrap; gap: 8px; }
 [data-mlink] { white-space: nowrap; }
+.actionbar .btn { white-space: nowrap; }
+.toast { display: flex; align-items: center; gap: 14px; }
+.toast-action { background: none; border: 0; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; padding: 10px 4px; min-height: 44px; cursor: pointer; }
+/* volunteers tab grouped by team */
+.vol-group { margin-top: 26px; padding-bottom: 6px; border-bottom: 2px solid var(--accent); }
+.vol-slot { font-size: 1rem; margin: 16px 0 6px; }
+.still-needed { background: #fff7e6; border: 1px solid #f3d9a4; border-radius: 10px; padding: 10px 12px; font-size: .92rem; margin: 12px 0; }
+.toast.show { pointer-events: auto; }
+/* sign-up page: event at a glance */
+.event-summary { background: var(--card, #fff); border: 1px solid var(--line, #e3e7ec); border-left: 4px solid var(--accent); border-radius: 12px; padding: 14px 16px; margin: 12px 0 16px; }
+.event-summary h1 { margin: 0 0 8px; }
+.event-summary .meta { margin: 2px 0; font-weight: 600; }
+.event-summary .desc { margin: 10px 0 0; }
+.event-summary .how { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line, #e3e7ec); font-size: .95rem; }
+/* keep the Help button from covering the last bit of the page */
+main.wrap { padding-bottom: 96px; }
+.help-fab { transition: padding .15s; }
+.help-fab.compact { padding: 11px; }
+.help-fab.compact .lbl { display: none; }
+.help-fab .lbl { font-weight: inherit; }
+/* comfortable tap targets for small text buttons */
+.btn.link { min-height: 44px; padding: 10px 8px; }
+.btn.small { min-height: 44px; }
+.slot-edit .btn.link, .chip-checks + .btn.link { min-width: 44px; }
+a.tap { display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; margin-left: -10px; margin-right: 6px; }

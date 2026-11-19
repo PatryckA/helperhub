@@ -31,13 +31,13 @@
       <button data-nav="teams" class="${active === 'teams' ? 'active' : ''}">${esc(T().many)}</button>
       <button data-nav="" class="${active === 'events' ? 'active' : ''}">Events</button>
       <button data-nav="settings" class="${active === 'settings' ? 'active' : ''}">${esc(kindInfo(group).settings)}</button>
-      <button data-nav="organisers" class="${active === 'organisers' ? 'active' : ''}">${esc(kindInfo(group).organisers)}</button>
     </div>`;
   }
   function bindNav() { $$('[data-nav]').forEach(b => b.onclick = () => go(b.dataset.nav)); }
 
   /* ---------------- Routing ---------------- */
-  window.addEventListener('hashchange', () => route());
+  window.addEventListener('hashchange', () => { flushLater(); route(); });
+  window.addEventListener('pagehide', flushLater);
   function go(hash) {
     if (dirty && !window.confirm('You have unsaved changes. Leave without saving?')) return;
     dirty = false;
@@ -62,7 +62,7 @@
     const h = location.hash.slice(1);
     dirty = false;
     if (h === 'settings') return showSettings();
-    if (h === 'organisers') return showOrganisers();
+    if (h === 'organisers') { showSettings(); setTimeout(() => { const o = $('#org-section'); if (o) o.scrollIntoView(); }, 300); return; }
     if (h === 'teams') return showTeams();
     if (h === 'new') return showEditor(blankEvent());
     const m = h.match(/^event\/(\d+)(?:\/(\w+))?$/);
@@ -83,17 +83,20 @@
     catch (err) { app.innerHTML = `<div class="error">${esc(err.message)}</div>`; return; }
     const today = new Date().toISOString().slice(0, 10);
     const active = events.filter(e => !e.archived), archived = events.filter(e => e.archived);
-    const upcoming = active.filter(e => !e.last_date || e.last_date >= today);
-    const past = active.filter(e => e.last_date && e.last_date < today);
+    // drafts, upcoming (soonest first), past (latest first), archived
+    const byDate = (a, b) => (a.first_date || '9999').localeCompare(b.first_date || '9999') || a.id - b.id;
+    const drafts = active.filter(e => !e.published && (!e.last_date || e.last_date >= today)).sort(byDate);
+    const upcoming = active.filter(e => e.published && (!e.last_date || e.last_date >= today)).sort(byDate);
+    const past = active.filter(e => e.last_date && e.last_date < today).sort((a, b) => byDate(b, a));
     const rows = list => list.map(e => `
       <tr class="click" data-id="${e.id}">
-        <td><strong>${esc(e.title)}</strong>${e.location ? `<div class="small muted">${esc(e.location)}</div>` : ''}</td>
-        <td class="hide-sm">${esc(fmtRange(e.first_date, e.last_date)) || '<span class="muted">No slots</span>'}</td>
+        <td><strong>${esc(e.title)}</strong>
+          <div class="small muted">${esc(fmtRange(e.first_date, e.last_date)) || 'No date yet'}${e.location ? ' · ' + esc(e.location) : ''}</div></td>
         <td>${e.archived ? '<span class="badge archived">Archived</span>' : e.published ? '<span class="badge">Live</span>' : '<span class="badge draft">Draft</span>'}</td>
-        <td>${e.filled} / ${e.capacity}</td>
+        <td style="white-space:nowrap">${e.filled} / ${e.capacity}</td>
       </tr>`).join('');
     const table = (list, empty) => list.length ? `
-      <table class="list"><thead><tr><th>Event</th><th class="hide-sm">Dates</th><th>Status</th><th>Filled</th></tr></thead>
+      <table class="list"><thead><tr><th>Event</th><th>Status</th><th>Filled</th></tr></thead>
       <tbody>${rows(list)}</tbody></table>` : `<p class="muted">${empty}</p>`;
 
     const welcome = new URLSearchParams(location.search).has('welcome');
@@ -108,19 +111,26 @@
       </div>
       ${emailWarningsHtml(status)}
       ${startedBar(events)}
-      <h2>Upcoming and drafts</h2>${table(upcoming, 'No upcoming events yet. Create one, or duplicate a past event.')}
+      ${drafts.length ? `<h2>Drafts</h2><p class="small muted" style="margin-top:-6px">Only organisers can see these. Open one and press Publish when it's ready.</p>${table(drafts, '')}` : ''}
+      <h2>Upcoming</h2>${table(upcoming, drafts.length ? 'Nothing published yet.' : 'No upcoming events yet. Press <strong>+ New event</strong> to create one.')}
       ${past.length ? `<div class="toolbar" style="margin-top:22px"><h2 style="margin:0">Past</h2><span class="spacer"></span>
         <button class="btn secondary small" id="archive-past">Archive all past events</button></div>${table(past, '')}` : ''}
       ${archived.length ? `<details class="archived-list" style="margin-top:22px"><summary><h2 style="display:inline;margin:0">Archived (${archived.length})</h2></summary>
         <p class="small muted">Hidden from volunteers, with no reminders or updates. Open one to restore it.</p>${table(archived, '')}</details>` : ''}
       ${emailStatusHtml(status)}`;
-    $('#new').onclick = () => go('new');
+    $('#new').onclick = () => newEventModal();
     if ($('#started-open')) $('#started-open').onclick = () => openHelp(true);
     if ($('#started-hide')) $('#started-hide').onclick = () => { try { localStorage.setItem('hh_started_hidden_' + slug, '1'); } catch { /* ignore */ } $('.started-bar').remove(); };
     maybeFirstHelp();
     if ($('#archive-past')) $('#archive-past').onclick = async () => {
-      if (!window.confirm(`Archive ${past.length} past event${past.length === 1 ? '' : 's'}? They're kept and can be restored any time.`)) return;
-      try { const r = await call(A + '/events/archive-past', { method: 'POST' }); toast(`${r.archived} event${r.archived === 1 ? '' : 's'} archived.`); showList(); }
+      try {
+        const r = await call(A + '/events/archive-past', { method: 'POST' });
+        toast(`${r.archived} event${r.archived === 1 ? '' : 's'} archived.`, 'ok', { label: 'Undo', onClick: async () => {
+          await Promise.all((r.ids || []).map(id => call(`${A}/events/${id}/archive`, { method: 'POST', body: { archived: false } }).catch(() => {})));
+          toast('Restored.'); showList();
+        } });
+        showList();
+      }
       catch (err) { toast(err.message, 'bad'); }
     };
     if ($('#copymany')) $('#copymany').onclick = () => copyEventModal();
@@ -147,10 +157,60 @@
   }
 
   /* ---------------- Editor ---------------- */
+  // Starting points for a new event. Jobs get their date from the event date once it's set.
+  const TEMPLATES = {
+    blank: { label: 'Start from scratch', hint: 'An empty event: add your own jobs and things to bring' },
+    roster: { label: 'Roster (BBQ, canteen, stall)', hint: 'Set-up, hourly shifts and pack-down',
+      rows: () => [job('Set-up', '08:00', '09:00', 2), job('BBQ cooking', '09:00', '10:00', 2), job('BBQ cooking', '10:00', '11:00', 2),
+        job('BBQ cooking', '11:00', '12:00', 2), job('Pack-down', '12:00', '13:00', 2)] },
+    bake: { label: 'Bake sale or bring a plate', hint: 'Food to bring plus helpers on the stall',
+      rows: () => [item('Sweet treats', 10, true), item('Savoury food', 6, true), item('Drinks', 4, true),
+        job('Stall helpers', '08:30', '10:30', 2), job('Stall helpers', '10:30', '12:30', 2)] },
+    bee: { label: 'Working bee', hint: 'Jobs for the morning plus morning tea',
+      rows: () => [job('Gardening', '09:00', '12:00', 6), job('Painting', '09:00', '12:00', 4), job('Rubbish removal', '09:00', '12:00', 2),
+        item('Morning tea', 4, true)] },
+    sport: { label: 'Sports day or carnival', hint: 'Jobs for each team, things each team brings, and a canteen for everyone',
+      rows: () => {
+        const perTeam = teams && teams.length ? { each_team: true, for_teams: null, team_slot_ids: {} } : {};
+        return [{ ...job('Scorer', '09:00', '12:00', 1), ...perTeam }, { ...job('Timekeeper', '09:00', '12:00', 1), ...perTeam },
+          { ...item('Oranges or snacks', 1, true), ...perTeam }, job('Canteen', '08:00', '10:00', 2), job('Canteen', '10:00', '12:00', 2)];
+      }, teams: true },
+    copy: { label: 'Copy a past event', hint: 'Same jobs as something you\'ve run before, with a new date' },
+  };
+  const job = (title, start_time, end_time, capacity) => ({ kind: 'shift', title, details: '', date: '', start_time, end_time, capacity, signups: [] });
+  const item = (title, capacity, is_food) => ({ kind: 'item', title, details: '', capacity, is_food: is_food ? 1 : 0, signups: [] });
+  let pendingTemplate = null;
+
   function blankEvent() {
-    return { id: null, title: '', description: '', location: '', contact_name: '', contact_email: '', published: 0,
-      donation_url: group.donation_url || '', donation_text: group.donation_text || '',
+    const ev = { id: null, title: '', description: '', location: '', contact_name: '', contact_email: '', published: 0,
+      donation_url: group.donation_url || '', donation_text: group.donation_text || '', dropoff_time: '',
       slots: [{ title: '', details: '', date: '', start_time: '09:00', end_time: '10:00', capacity: 2, signups: [] }] };
+    const t = TEMPLATES[pendingTemplate];
+    pendingTemplate = null;
+    if (t && t.rows) {
+      ev.rows = t.rows();
+      ev.team_ids = t.teams && teams ? teams.map(x => x.id) : [];
+      if (ev.rows.some(r => r.kind === 'item')) ev.dropoff_time = '08:00';
+    }
+    return ev;
+  }
+
+  function newEventModal() {
+    modal(`
+      <h2>New event</h2>
+      <p class="small muted" style="margin-top:-6px">Pick a starting point. You can change everything afterwards.</p>
+      <div class="stack" style="gap:8px">${Object.entries(TEMPLATES).map(([k, v]) => `
+        <button class="action-row" data-tpl="${k}"><strong>${esc(v.label)}</strong><span>${esc(v.hint)}${v.teams && teams && teams.length ? ` (all your ${esc(T().many.toLowerCase())} ticked)` : ''}</span></button>`).join('')}
+      </div>
+      <div class="actions"><button class="btn secondary" data-close>Cancel</button></div>`,
+    (m, close) => {
+      $$('[data-tpl]', m).forEach(b => b.onclick = () => {
+        close();
+        if (b.dataset.tpl === 'copy') return copyEventModal();
+        pendingTemplate = b.dataset.tpl;
+        if (location.hash === '#new') route(); else go('new');
+      });
+    });
   }
 
   function showEditor(ev) {
@@ -180,14 +240,15 @@
             <button role="menuitem" id="copylink">Copy volunteer link</button>
             <a role="menuitem" href="/${esc(slug)}/event/${ev.id}" target="_blank" rel="noopener">Preview volunteer page</a>
             <button role="menuitem" id="dup">Copy event</button>
+            ${ev.published ? '<button role="menuitem" id="unpub">Move back to draft</button>' : ''}
             <button role="menuitem" id="arch">${ev.archived ? 'Restore event' : 'Archive event'}</button>
             <button role="menuitem" id="del" class="bad">Delete event</button>
           </div>
         </div>
       </div>` : ''}
       ${saved ? `<div class="tabs sub">
-        <button data-tab="setup" class="${tab === 'setup' ? 'active' : ''}">Details &amp; slots</button>
-        <button data-tab="volunteers" class="${tab === 'volunteers' ? 'active' : ''}">Volunteers (${filled}/${cap})</button>
+        <button data-tab="setup" class="${tab === 'setup' ? 'active' : ''}">Details &amp; jobs</button>
+        <button data-tab="volunteers" class="${tab === 'volunteers' ? 'active' : ''}">Helpers (${filled}/${cap})</button>
       </div>` : '<div style="height:12px"></div>'}
       <div id="tab-body"></div>`;
     $('#back').onclick = e => { e.preventDefault(); go(''); };
@@ -225,11 +286,22 @@
       const setArchived = async on => {
         try {
           await call(`${A}/events/${ev.id}/archive`, { method: 'POST', body: { archived: on } });
-          toast(on ? 'Event archived.' : 'Event restored.');
-          if (on) go(''); else { const { event } = await call(`${A}/events/${ev.id}`); showEditor(event); }
+          if (on) {
+            toast('Event archived.', 'ok', { label: 'Undo', onClick: async () => {
+              await call(`${A}/events/${ev.id}/archive`, { method: 'POST', body: { archived: false } }).catch(() => {});
+              toast('Event restored.'); go('event/' + ev.id);
+            } });
+            go('');
+          } else { toast('Event restored.'); const { event } = await call(`${A}/events/${ev.id}`); showEditor(event); }
         } catch (err) { toast(err.message, 'bad'); }
       };
       $('#arch').onclick = () => setArchived(!ev.archived);
+      if ($('#unpub')) $('#unpub').onclick = async () => {
+        if (!window.confirm('Move this event back to a draft? Helpers won\'t be able to see it or sign up until you publish it again.')) return;
+        tab = 'setup'; history.replaceState(null, '', '#event/' + ev.id); showEditor(current);
+        current.published = 0;
+        if (await save({ quiet: true })) toast('Moved back to draft.');
+      };
       if ($('#unarchive')) $('#unarchive').onclick = () => setArchived(false);
     }
     if (tab === 'volunteers' && saved) renderVolunteers(); else renderSetup();
@@ -283,38 +355,44 @@
   function renderSetup() {
     const ev = current;
     if (!ev.rows) { ev.team_ids = ev.team_ids || []; ev.rows = collapseSlots(ev.slots, ev.team_ids); }
+    if (ev._date === undefined) ev._date = firstDate();
     if (!ev._fold) {
       // which sections start open: the ones with something in them (time slots open on a new event)
       const shifts = ev.rows.some(r => r.kind !== 'item'), items = ev.rows.some(r => r.kind === 'item');
-      ev._fold = { details: true, taking: !!(teams && teams.length), updates: false, slots: shifts || !items, items };
+      ev._fold = { details: true, extras: false, taking: !!(teams && teams.length), updates: false, slots: shifts || !items, items };
     }
     $('#tab-body').innerHTML = `
       ${foldHead('details', 'Event details')}
       <form id="evform" class="card">
-        <label for="f-title">Event name</label>
+        <label for="f-title" style="margin-top:0">Event name</label>
         <input id="f-title" data-k="title" type="text" value="${esc(ev.title)}" placeholder="e.g. Spring Fete" required>
         <div class="row">
+          <div><label for="f-date">Date</label><input id="f-date" type="date" value="${esc(ev._date || '')}"></div>
           <div><label for="f-location">Location</label><input id="f-location" data-k="location" type="text" value="${esc(ev.location)}" placeholder="e.g. School hall"></div>
-          <div><label class="check" style="margin-top:44px"><input type="checkbox" id="f-pub" ${ev.published ? 'checked' : ''}> Live (volunteers can see it)</label></div>
         </div>
+        <p class="small muted" style="margin:4px 0 0" id="date-hint">${ev._date ? 'Changing the date moves every job to the new date.' : 'New jobs use this date. You can still give a job a different date.'}</p>
         <label for="f-desc">Description <span class="opt">(shown at the top of the sign-up page)</span></label>
-        <textarea id="f-desc" data-k="description" placeholder="What the event is and anything volunteers should know">${esc(ev.description)}</textarea>
-        <div class="row">
-          <div><label for="f-cn">Contact name <span class="opt">(optional)</span></label><input id="f-cn" data-k="contact_name" type="text" value="${esc(ev.contact_name)}"></div>
-          <div><label for="f-ce">Contact email <span class="opt">(replies go here)</span></label><input id="f-ce" data-k="contact_email" type="email" value="${esc(ev.contact_email)}"></div>
-        </div>
-        <label for="f-du">Donation link <span class="opt">(optional: shows a "Donate instead" button linking to your online donation or payment page)</span></label>
-        <input id="f-du" data-k="donation_url" type="url" value="${esc(ev.donation_url || '')}" placeholder="https://...">
-        <label for="f-dx">Donation message <span class="opt">(optional)</span></label>
-        <input id="f-dx" data-k="donation_text" type="text" value="${esc(ev.donation_text || '')}" placeholder="Can't bring something? You're welcome to donate instead.">
+        <textarea id="f-desc" data-k="description" placeholder="What the event is and anything helpers should know">${esc(ev.description)}</textarea>
       </form></div></section>
+      ${foldHead('extras', 'Extras (optional)')}
+      <div class="card">
+        <div class="row">
+          <div><label for="f-cn" style="margin-top:0">Contact name</label><input id="f-cn" data-k="contact_name" type="text" value="${esc(ev.contact_name)}" placeholder="${esc(group.contact_name || '')}"></div>
+          <div><label for="f-ce" style="margin-top:0">Contact email <span class="opt">(replies go here)</span></label><input id="f-ce" data-k="contact_email" type="email" value="${esc(ev.contact_email)}" placeholder="${esc(group.contact_email || '')}"></div>
+        </div>
+        <p class="small muted" style="margin:4px 0 0">Leave blank to use your ${esc(kindInfo(group).settings.replace(' settings', '').toLowerCase())}'s contact${group.contact_email ? ` (${esc(group.contact_email)})` : ''}.</p>
+        <label for="f-du">Donation link <span class="opt">(shows a "Donate instead" button linking to your online donation or payment page)</span></label>
+        <input id="f-du" data-k="donation_url" type="url" value="${esc(ev.donation_url || '')}" placeholder="https://...">
+        <label for="f-dx">Donation message</label>
+        <input id="f-dx" data-k="donation_text" type="text" value="${esc(ev.donation_text || '')}" placeholder="Can't bring something? You're welcome to donate instead.">
+      </div></div></section>
       ${teams && teams.length ? `${foldHead('taking', `${esc(T().many)} taking part`)}<div class="card" id="taking"></div></div></section>` : '<div id="taking" class="hidden"></div>'}
       ${foldHead('updates', 'Organiser updates')}<div class="card" id="alerts"></div></div></section>
-      ${foldHead('slots', 'Time slots')}
+      ${foldHead('slots', 'Jobs')}
       <div class="toolbar" style="margin:0 0 6px">
-        <p class="small muted" style="margin:0">Each slot is one task at one time. Volunteers take the whole slot.</p><span class="spacer"></span>
+        <p class="small muted" style="margin:0">Each job is one task at one time, e.g. "BBQ, 10am to 11am, 2 helpers".</p><span class="spacer"></span>
         <button class="btn secondary small" id="addrun">+ Add a run of shifts</button>
-        <button class="btn secondary small" id="addslot">+ Add slot</button>
+        <button class="btn secondary small" id="addslot">+ Add job</button>
       </div>
       <div id="slots" class="stack"></div></div></section>
       ${foldHead('items', 'Things to bring')}
@@ -334,14 +412,16 @@
       <div id="save-err"></div>
       <div class="actionbar show"><div class="inner">
         <span class="small muted" id="dirty-note">${ev.id ? 'All changes saved' : 'Not saved yet'}</span>
-        <button class="btn" id="save">${ev.id ? 'Save changes' : 'Save event'}</button>
+        ${ev.published ? `<button class="btn" id="save">Save changes</button>`
+          : `<span style="display:flex;gap:8px"><button class="btn secondary" id="save">Save draft</button><button class="btn" id="publish">Publish</button></span>`}
       </div></div>`;
-    $$('#evform [data-k], #dropoff [data-k]').forEach(inp => inp.addEventListener('input', () => { ev[inp.dataset.k] = inp.value; markDirty(); }));
-    $('#f-pub').addEventListener('change', e => { ev.published = e.target.checked ? 1 : 0; markDirty(); });
+    $$('#tab-body [data-k]').forEach(inp => { if (inp.closest('.slot-edit')) return; inp.addEventListener('input', () => { ev[inp.dataset.k] = inp.value; markDirty(); }); });
+    $('#f-date').addEventListener('change', e => setEventDate(e.target.value));
     $('#addslot').onclick = addSlot;
     $('#additem').onclick = addItem;
     $('#addrun').onclick = runModal;
-    $('#save').onclick = save;
+    $('#save').onclick = () => save();
+    if ($('#publish')) $('#publish').onclick = publish;
     if (!ev._sched) {
       const load = v => (v === null || v === undefined) ? { auto: true, dates: [] } : { auto: false, dates: v ? v.split(',') : [] };
       ev._sched = { gap: load(ev.gap_alerts), roster: load(ev.roster_alerts) };
@@ -360,8 +440,8 @@
 
   /* ---------------- Organiser updates: unfilled spots + who's doing what ---------------- */
   const SCHED = {
-    gap: { title: 'Unfilled spot alerts', days: 3, what: "if any spots are still empty, with a button to share the gaps" },
-    roster: { title: "Who's doing what", days: 1, what: "listing who signed up for each slot and item, with a button to share it" },
+    gap: { title: 'Empty job alerts', days: 3, what: "if any jobs still need helpers, with a button to share the gaps" },
+    roster: { title: "Who's doing what", days: 1, what: "listing who's doing each job and bringing each thing, with a button to share it" },
   };
   function firstDate() {
     return current.rows.map(s => s.kind === 'item' ? current.dropoff_date : s.date).filter(Boolean).sort()[0] || '';
@@ -399,7 +479,7 @@
         ${dates.map((d, i) => `
           <div class="toolbar" style="gap:10px;flex-wrap:nowrap">
             <input type="date" data-sched="${kind}" data-i="${i}" value="${esc(d)}" style="max-width:200px">
-            <span class="small muted">${st.auto ? (first ? `${def === 1 ? '1 day' : def + ' days'} before (default)` : 'Add a slot date first') : (d && first ? daysBefore(d, first) : '')}</span>
+            <span class="small muted">${st.auto ? (first ? `${def === 1 ? '1 day' : def + ' days'} before (default)` : 'Add a job date first') : (d && first ? daysBefore(d, first) : '')}</span>
             <span class="spacer"></span>
             <button class="btn link" data-sched-rm="${kind}" data-i="${i}" style="color:var(--bad)">Remove</button>
           </div>`).join('') || '<p class="small muted" style="margin:0">None scheduled.</p>'}
@@ -414,7 +494,7 @@
           : people.map(p => `<label class="check small" style="margin:6px 0 0"><input type="checkbox" data-alert-to="${esc(p.email)}" ${chosen.has(p.email) ? 'checked' : ''}> ${esc(p.label)}${p.isContact ? ' <span class="badge">Contact</span>' : ''}</label>`).join('')}
         ${organisers !== null && !chosen.size ? `<p class="small muted" style="margin:6px 0 0">Nobody ticked, so they'll go to ${fallback}.</p>` : ''}
         ${(teams || []).length ? `<p class="small muted" style="margin:6px 0 0">${esc(T().role.charAt(0).toUpperCase() + T().role.slice(1))}s also get updates for their own ${esc(T().one.toLowerCase())}'s slots.</p>` : ''}
-        <p class="small muted" style="margin:6px 0 0">Choose who's ticked for new events on the ${esc(kindInfo(group).organisers)} tab.</p>
+        <p class="small muted" style="margin:6px 0 0">Choose who's ticked for new events under ${esc(kindInfo(group).organisers)} in ${esc(kindInfo(group).settings)}.</p>
       </div>
       ${block('gap')}
       ${block('roster')}`;
@@ -449,7 +529,7 @@
       label: 'Ask for helpers', hint: 'Invite people to sign up. Lists everything still needed.',
       text(ev) {
         const open = upcoming(ev).filter(s => leftIn(s) > 0);
-        if (!open.length) return { empty: 'Every spot is already filled.' };
+        if (!open.length) return { empty: 'Every job already has its helpers.' };
         const all = upcoming(ev);
         const shifts = all.filter(s => s.kind !== 'item');
         const dates = [...new Set(shifts.map(s => s.date))].sort();
@@ -469,10 +549,10 @@
       },
     },
     gaps: {
-      label: 'Fill the gaps', hint: 'A follow-up for spots that are still empty.',
+      label: 'Fill the gaps', hint: 'A follow-up for jobs that still need helpers.',
       text(ev) {
         const open = upcoming(ev).filter(s => leftIn(s) > 0);
-        if (!open.length) return { empty: 'All spots are filled. Nice work!' };
+        if (!open.length) return { empty: 'Everything is covered. Nice work!' };
         return `We still need helpers for ${shareScope ? `${shareScope.name} at ` : ''}${ev.title}!\n\n${open.map(s => slotLine(s, `${leftIn(s)} more`)).join('\n')}\n\nCan you help? Sign up here: ${eventUrl(ev)}`;
       },
     },
@@ -489,7 +569,7 @@
         const parts = [`Here's who's helping ${shareScope ? `for ${shareScope.name} ` : ''}at ${ev.title}. Thank you!`];
         if (shifts.length) parts.push(shifts.map(s => `*${label(s)}*, ${niceDate(s.date)} ${tShort(s.start_time)} to ${tShort(s.end_time)}\n${who(s)}`).join('\n\n'));
         if (items.length) parts.push(`*Things to bring* (drop off by ${tShort(ev.dropoff_time)} ${niceDate(ev.dropoff_date)}${ev.dropoff_note ? ', ' + ev.dropoff_note : ''})\n` + items.map(s => `• ${label(s)}: ${who(s)}`).join('\n'));
-        parts.push(slots.some(s => leftIn(s) > 0) ? `Spots still free: ${eventUrl(ev)}` : 'All spots are filled. See you there!');
+        parts.push(slots.some(s => leftIn(s) > 0) ? `Sign up here: ${eventUrl(ev)}` : 'Everything is covered. See you there!');
         return parts.join('\n\n');
       },
     },
@@ -506,7 +586,7 @@
       <p class="small muted" style="margin-top:-6px">Pick a ready-made message, then post it in a WhatsApp group, or email it to the people already signed up.</p>
       ${evTeams.length ? `<label for="share-team" style="margin-top:0">Who is it for?</label>
       <select id="share-team"><option value="">Everyone (all ${esc(T().many.toLowerCase())})</option>${evTeams.map(t => `<option value="${t.id}">${esc(t.name)} only</option>`).join('')}</select>
-      <p class="small muted" style="margin:4px 0 10px">Pick one to share just their jobs in their own chat. The link then shows only their slots (plus any for everyone).</p>` : ''}
+      <p class="small muted" style="margin:4px 0 10px">Pick one to share just their jobs in their own chat. The link then shows only their jobs (plus any for everyone).</p>` : ''}
       <div class="choice" role="radiogroup">${Object.entries(SHARE).map(([k, v]) => `
         <label class="choice-item"><input type="radio" name="share-kind" value="${k}" ${k === kind ? 'checked' : ''}>
           <span><strong>${v.label}</strong><br><span class="small muted">${v.hint}</span></span></label>`).join('')}
@@ -545,7 +625,20 @@
     });
   }
 
-  function markDirty() { dirty = true; const n = $('#dirty-note'); if (n) n.textContent = 'Unsaved changes'; }
+  // Do something a few seconds from now unless Undo is pressed (or straight away if the page changes)
+  let pending = [];
+  function laterAction(msg, doIt, undo) {
+    const p = { doIt };
+    p.timer = setTimeout(() => { pending = pending.filter(x => x !== p); doIt(); }, 6000);
+    pending.push(p);
+    toast(msg, 'ok', { label: 'Undo', onClick: () => { clearTimeout(p.timer); pending = pending.filter(x => x !== p); undo(); } }, 6000);
+  }
+  function flushLater() { const list = pending; pending = []; list.forEach(p => { clearTimeout(p.timer); p.doIt(); }); }
+
+  function markDirty() {
+    dirty = true; const n = $('#dirty-note'); if (n) n.textContent = 'Unsaved changes';
+    const e = $('#save-err'); if (e && e.textContent.startsWith('Nearly there')) e.innerHTML = ''; // the publish checklist is out of date once something changes
+  }
 
   function renderSlots() {
     foldSummaries();
@@ -682,7 +775,7 @@
     box.innerHTML = `
       <p class="small muted" style="margin:0 0 10px">Tick the ${esc(L.many.toLowerCase())} at this event. Jobs set to "Each ${esc(L.one.toLowerCase())} taking part" are created for every ticked one.</p>
       <div class="chip-checks">${teams.map(t => `<label class="chip-check"><input type="checkbox" value="${t.id}" ${chosen.has(t.id) ? 'checked' : ''}> ${esc(t.name)}</label>`).join('')}</div>
-      <p class="small" style="margin:10px 0 0"><a href="#" id="taking-all">Tick all</a> · <a href="#" id="taking-none">Clear</a></p>`;
+      <p class="small" style="margin:6px 0 0"><a href="#" class="tap" id="taking-all">Tick all</a> <a href="#" class="tap" id="taking-none">Clear</a></p>`;
     const update = () => {
       const had = (current.team_ids || []).length;
       current.team_ids = $$('#taking input:checked').map(c => +c.value);
@@ -706,6 +799,7 @@
     dropBlankStarter();
     // with teams taking part, things to bring default to "each team" so every team's share is tracked
     const perTeam = takingTeams().length > 0;
+    if (!current.dropoff_date && current._date) { current.dropoff_date = current._date; if ($('#f-dd')) $('#f-dd').value = current._date; }
     current.rows.push({ kind: 'item', title: '', details: '', capacity: perTeam ? 1 : 4, is_food: 0, signups: [],
       ...(perTeam ? { each_team: true, for_teams: null, team_id: null, team_slot_ids: {} } : {}) });
     markDirty(); renderSlots();
@@ -716,7 +810,7 @@
   function addSlot() {
     const shiftsOnly = current.rows.filter(s => s.kind !== 'item');
     const last = shiftsOnly[shiftsOnly.length - 1];
-    let next = { title: '', details: '', date: '', start_time: '09:00', end_time: '10:00', capacity: 2, signups: [] };
+    let next = { title: '', details: '', date: current._date || '', start_time: '09:00', end_time: '10:00', capacity: 2, signups: [] };
     if (last) {
       // continue straight after the previous slot, same length
       const mins = toMin(last.end_time) - toMin(last.start_time);
@@ -731,7 +825,54 @@
   const toMin = t => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + m; };
   const fromMin = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
-  async function save() {
+  // the date at the top: filling it in dates any undated jobs; changing it moves every job by the same number of days
+  function setEventDate(d) {
+    const ev = current, old = ev._date;
+    if (!d) { ev._date = ''; return; }
+    const shift = old ? Math.round((Date.parse(d) - Date.parse(old)) / 86400e3) : 0;
+    const move = x => { const t = new Date(x + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() + shift); return t.toISOString().slice(0, 10); };
+    for (const r of ev.rows) if (r.kind !== 'item') r.date = !r.date ? d : old ? move(r.date) : r.date;
+    if (ev.rows.some(r => r.kind === 'item') || ev.dropoff_date) ev.dropoff_date = !ev.dropoff_date ? d : old ? move(ev.dropoff_date) : ev.dropoff_date;
+    ev._date = d;
+    if ($('#f-dd')) $('#f-dd').value = ev.dropoff_date || '';
+    $('#date-hint').textContent = 'Changing the date moves every job to the new date.';
+    markDirty(); renderSlots(); renderAlerts();
+  }
+
+  // Publish: check the essentials, save as live, then offer the next step (sharing)
+  async function publish() {
+    const ev = current, problems = [];
+    if (!String(ev.title || '').trim()) problems.push('Give the event a name.');
+    if (!ev.rows.some(r => String(r.title || '').trim())) problems.push('Add at least one job or thing to bring.');
+    if (ev.rows.some(r => r.kind !== 'item' && String(r.title || '').trim() && !r.date)) problems.push('Give every job a date (or set the event date at the top).');
+    if (ev.rows.some(r => r.kind === 'item') && (!ev.dropoff_date || !ev.dropoff_time)) problems.push('Set the drop-off date and time for things to bring.');
+    if (problems.length) {
+      $('#save-err').innerHTML = `<div class="error"><strong>Nearly there:</strong><ul style="margin:6px 0 0;padding-left:20px">${problems.map(p => `<li>${esc(p)}</li>`).join('')}</ul></div>`;
+      $('#save-err').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    ev.published = 1;
+    const saved = await save({ quiet: true });
+    if (!saved) { ev.published = 0; return; }
+    const hasTeams = (saved.team_ids || []).length;
+    modal(`
+      <h2>Your event is live</h2>
+      <p>${esc(cap(kindInfo(group).people))} can now sign up. Next, let people know:</p>
+      <div class="stack" style="gap:8px">
+        ${hasTeams ? `<button class="action-row" id="pub-managers"><strong>Send message to ${esc(T().role)}s</strong><span>Each ${esc(T().role)} gets their ${esc(T().one.toLowerCase())}'s jobs and links</span></button>` : ''}
+        <button class="action-row" id="pub-share"><strong>Send message to everyone</strong><span>A ready-made "can you help?" message for your WhatsApp groups</span></button>
+        <button class="action-row" id="pub-copy"><strong>Copy the sign-up link</strong><span>Paste it into a newsletter, email or website</span></button>
+      </div>
+      <div class="actions"><button class="btn secondary" data-close>Done</button></div>`,
+    (m, close) => {
+      if ($('#pub-managers', m)) $('#pub-managers', m).onclick = () => managersModal(current);
+      $('#pub-share', m).onclick = () => shareModal(current);
+      $('#pub-copy', m).onclick = () => { copyLink(saved.id); close(); };
+    });
+  }
+  const cap = x => x.charAt(0).toUpperCase() + x.slice(1);
+
+  async function save(opts = {}) {
     const btn = $('#save');
     $('#save-err').innerHTML = '';
     btn.disabled = true; btn.textContent = 'Saving…';
@@ -745,12 +886,16 @@
         ? await call(A + '/events/' + current.id, { method: 'PUT', body })
         : await call(A + '/events', { method: 'POST', body });
       dirty = false;
-      toast(event.published ? 'Saved. The event is live.' : 'Saved as a draft. Tick "Live" when it\'s ready.');
+      if (!opts.quiet) toast(event.published ? 'Saved.' : 'Saved as a draft. Press Publish when it\'s ready.');
       history.replaceState(null, '', '#event/' + event.id);
+      const fold = current._fold;
       showEditor(event);
+      if (fold) { current._fold = fold; }
+      return event;
     } catch (err) {
       $('#save-err').innerHTML = `<div class="error">${esc(err.message)}</div>`;
-      btn.disabled = false; btn.textContent = current.id ? 'Save changes' : 'Save event';
+      btn.disabled = false; btn.textContent = current.published ? 'Save changes' : 'Save draft';
+      return null;
     }
   }
 
@@ -770,28 +915,44 @@
     : `${esc(fmtDateShort(s.date))}, ${fmtTime(s.start_time)} to ${fmtTime(s.end_time)} · ${esc(slotName(s))}`;
   function renderVolunteers() {
     const ev = current;
+    const label = s => s.kind === 'item' ? `Bring: ${esc(s.title)}` : `${esc(s.title)} <span class="muted" style="font-weight:400">· ${esc(fmtDateShort(s.date))}, ${fmtTime(s.start_time)} to ${fmtTime(s.end_time)}</span>`;
+    const short = s => s.kind === 'item' ? `${esc(s.title)} (to bring)` : `${esc(s.title)} ${fmtTime(s.start_time)}`;
+    // group by team when teams are involved, so each team's helpers are together
+    const groups = [];
+    const teamOrder = (teams || []).map(t => t.id);
+    const ids = [...new Set(ev.slots.map(s => Number(s.team_id) || 0))].sort((x, y) => (x ? teamOrder.indexOf(x) : 1e9) - (y ? teamOrder.indexOf(y) : 1e9));
+    for (const id of ids) groups.push({ name: id ? teamName(id) : (ids.length > 1 ? 'For everyone' : ''), slots: ev.slots.filter(s => (Number(s.team_id) || 0) === id) });
+    const table = s => `<table class="list roster"><thead><tr><th>Name</th>${group.question_label ? `<th>${esc(group.question_label)}</th>` : ''}${s.kind === 'item' ? '<th>Bringing</th>' : ''}${s.needs_wwcc ? '<th>WWCC</th>' : ''}<th>Mobile</th><th class="hide-sm">Email</th><th class="hide-sm">Comments</th><th></th></tr></thead><tbody>
+      ${s.signups.map(g => `<tr data-row="${g.id}">
+        <td>${esc(g.first_name)} ${esc(g.last_name)}<div class="show-sm small"><a href="mailto:${esc(g.email)}">${esc(g.email)}</a></div>${g.comments ? `<div class="show-sm small muted">${esc(g.comments)}</div>` : ''}</td>
+        ${group.question_label ? `<td>${esc(g.answer)}</td>` : ''}
+        ${s.needs_wwcc ? `<td>${wwccCell(g, s)}</td>` : ''}
+        ${s.kind === 'item' ? `<td><strong>${esc(g.item_desc)}</strong>${dietLabels(g.dietary).map(d => `<span class="diet">${esc(d)}</span>`).join('')}</td>` : ''}
+        <td><a href="tel:${esc(g.mobile.replace(/\s/g, ''))}">${esc(g.mobile)}</a></td>
+        <td class="hide-sm"><a href="mailto:${esc(g.email)}">${esc(g.email)}</a></td>
+        <td class="hide-sm">${esc(g.comments)}</td>
+        <td style="text-align:right"><button class="btn danger small" data-rm="${g.id}" data-name="${esc(g.first_name)} ${esc(g.last_name ? g.last_name[0] + '.' : '')}">Remove</button></td>
+      </tr>`).join('')}</tbody></table>`;
     $('#tab-body').innerHTML = `
-      <div class="toolbar"><span class="muted small">Contact details are only visible to admins.</span><span class="spacer"></span>
-        <button class="btn small" id="addvol">+ Add volunteer</button></div>
-      ${ev.slots.map(s => `
-        <h2 style="font-size:17px">${slotLabel(s)}
-          <span class="badge ${s.signups.length >= s.capacity ? 'full' : ''}" style="margin-left:6px">${s.signups.length}/${s.capacity}</span></h2>
-        ${s.signups.length ? `<table class="list roster"><thead><tr><th>Name</th>${group.question_label ? `<th>${esc(group.question_label)}</th>` : ''}${s.kind === 'item' ? '<th>Bringing</th>' : ''}${s.needs_wwcc ? '<th>WWCC</th>' : ''}<th>Mobile</th><th class="hide-sm">Email</th><th class="hide-sm">Comments</th><th></th></tr></thead><tbody>
-          ${s.signups.map(g => `<tr>
-            <td>${esc(g.first_name)} ${esc(g.last_name)}</td>
-            ${group.question_label ? `<td>${esc(g.answer)}</td>` : ''}
-            ${s.needs_wwcc ? `<td>${wwccCell(g, s)}</td>` : ''}
-            ${s.kind === 'item' ? `<td><strong>${esc(g.item_desc)}</strong>${dietLabels(g.dietary).map(d => `<span class="diet">${esc(d)}</span>`).join('')}</td>` : ''}
-            <td><a href="tel:${esc(g.mobile.replace(/\s/g, ''))}">${esc(g.mobile)}</a></td>
-            <td class="hide-sm"><a href="mailto:${esc(g.email)}">${esc(g.email)}</a></td>
-            <td class="hide-sm">${esc(g.comments)}</td>
-            <td style="text-align:right"><button class="btn danger small" data-rm="${g.id}">Remove</button></td>
-          </tr>`).join('')}</tbody></table>` : '<p class="muted small">Nobody yet.</p>'}`).join('')}`;
+      <div class="toolbar"><span class="muted small">Contact details are only visible to organisers.</span><span class="spacer"></span>
+        <button class="btn small" id="addvol">+ Add helper</button></div>
+      ${groups.map(gr => {
+        const got = gr.slots.reduce((n, s) => n + s.signups.length, 0), need = gr.slots.reduce((n, s) => n + s.capacity, 0);
+        const empty = gr.slots.filter(s => !s.signups.length);
+        return `${gr.name ? `<h2 class="vol-group">${esc(gr.name)} <span class="badge ${got >= need ? 'full' : ''}">${got}/${need}</span></h2>` : ''}
+        ${gr.slots.filter(s => s.signups.length).map(s => `
+          <h3 class="vol-slot">${label(s)} <span class="badge ${s.signups.length >= s.capacity ? 'full' : ''}">${s.signups.length}/${s.capacity}</span></h3>${table(s)}`).join('')}
+        ${empty.length ? `<p class="still-needed"><strong>Nobody yet:</strong> ${empty.map(s => `${short(s)}${s.capacity > 1 ? ` ×${s.capacity}` : ''}`).join(', ')}</p>` : ''}`;
+      }).join('')}`;
     $('#addvol').onclick = () => addVolunteerModal();
-    $$('[data-rm]').forEach(b => b.onclick = async () => {
-      if (!b.classList.contains('confirm')) { b.classList.add('confirm'); b.textContent = 'Confirm'; setTimeout(() => { b.classList.remove('confirm'); b.textContent = 'Remove'; }, 4000); return; }
-      try { const { event } = await call(A + '/signups/' + b.dataset.rm, { method: 'DELETE' }); toast('Volunteer removed.'); showEditor(event); }
-      catch (err) { toast(err.message, 'bad'); }
+    // remove straight away, with a few seconds to undo before it's final
+    $$('[data-rm]').forEach(b => b.onclick = () => {
+      const id = b.dataset.rm, row = $(`[data-row="${id}"]`);
+      row.style.display = 'none';
+      laterAction(`Removed ${b.dataset.name}`, async () => {
+        try { const { event } = await call(A + '/signups/' + id, { method: 'DELETE' }); if (current && current.id === event.id && tab === 'volunteers') showEditor(event); }
+        catch (err) { row.style.display = ''; toast(err.message, 'bad'); }
+      }, () => { row.style.display = ''; });
     });
   }
 
@@ -856,7 +1017,7 @@
       ${group.question_label ? `<label>${esc(group.question_label)}</label><input type="text" id="v-answer">` : ''}
       <label>Comments <span class="opt">(optional)</span></label><input type="text" id="v-comments">
       <label class="check" style="margin-top:14px"><input type="checkbox" id="v-send" checked> Email them a confirmation</label>
-      <p class="small muted">Admins can add people even when a slot is full.</p>
+      <p class="small muted">Organisers can add people even when a job is full.</p>
       <div id="v-err"></div>
       <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="v-go">Add volunteer</button></div>`,
     (m, close) => {
@@ -1108,7 +1269,7 @@
   // Help for whatever screen the organiser is on; opens by itself the first time they visit
   async function openHelp(first) {
     const h = location.hash.slice(1);
-    const page = h === 'settings' ? 'settings' : h === 'organisers' ? 'organisers' : h === 'teams' ? 'teams'
+    const page = h === 'settings' || h === 'organisers' ? 'settings' : h === 'teams' ? 'teams'
       : h === 'new' ? 'editor' : /^event\/\d+\/volunteers$/.test(h) ? 'volunteers' : /^event\/\d+$/.test(h) ? (tab === 'volunteers' ? 'volunteers' : 'editor') : 'events';
     let events = [];
     try { ({ events } = await call(A + '/events')); } catch { /* help still works without the list */ }
@@ -1139,10 +1300,10 @@
   }
 
   function renderHeader() {
-    groupHeader(group, `<a href="/${esc(slug)}" target="_blank">View page</a>${me.groups.length > 1 || me.is_owner ? '<a href="/login?choose=1">My groups</a>' : ''}${me.is_owner ? '<a href="/owner">Owner</a>' : ''}<a href="#" id="hdr-logout">Log out</a>`);
+    groupHeader(group, `<a href="/${esc(slug)}" target="_blank">View page</a>${me.groups.length > 1 || me.is_owner ? '<a href="/login?choose=1">My groups</a>' : ''}${me.is_owner ? '<a href="/owner">Owner</a>' : ''}<a href="#" id="hdr-logout">Log out</a>`, 'Organiser view');
     $('#hdr-logout').onclick = e => { e.preventDefault(); logout(); };
     if (!$('#help-fab')) {
-      document.body.insertAdjacentHTML('beforeend', '<button type="button" class="help-fab" id="help-fab" aria-label="Help and guidance"><span aria-hidden="true">?</span> Help</button>');
+      document.body.insertAdjacentHTML('beforeend', '<button type="button" class="help-fab" id="help-fab" aria-label="Help and guidance"><span aria-hidden="true">?</span> <b class="lbl">Help</b></button>');
       $('#help-fab').onclick = () => openHelp(false);
     }
     document.title = `${group.name} | HelperHub organisers`;
@@ -1207,9 +1368,11 @@
         </div>
         <div id="s-err"></div>
       </form>
+      <div class="card" id="org-section" style="margin-top:14px"></div>
       <div class="actionbar show"><div class="inner"><span class="small muted" id="dirty-note">All changes saved</span><button class="btn" id="s-save">Save settings</button></div></div>`;
     bindNav();
     foldCards($('#sform'), 0);
+    renderOrganisers($('#org-section'));
     const preview = () => {
       $('#s-preview').style.background = g.accent;
       const light = getComputedStyle(document.documentElement).getPropertyValue('--on-accent');
@@ -1263,25 +1426,23 @@
   }
 
   /* ---------------- Organisers ---------------- */
-  async function showOrganisers() {
-    app.innerHTML = `${groupNav('organisers')}<div class="spinner"></div>`;
-    bindNav();
+  // The organisers list, shown as a section of the settings tab
+  async function renderOrganisers(box) {
+    box.innerHTML = '<div class="spinner"></div>';
     let list;
     try { ({ organisers: list } = await call(A + '/organisers')); }
-    catch (err) { app.innerHTML = `${groupNav('organisers')}<div class="error">${esc(err.message)}</div>`; bindNav(); return; }
-    app.innerHTML = `
-      ${groupNav('organisers')}
-      <div class="toolbar"><h1 style="margin:0">${esc(kindInfo(group).organisers)}</h1><span class="spacer"></span><button class="btn" id="invite">+ Add organiser</button></div>
-      <p class="muted">Organisers can create events, see volunteers' contact details and change settings. They log in with an emailed link. Tap a name to correct it.</p>
-      <p class="muted small">Tick <strong>Updates</strong> for the people who should get unfilled spot and "who's doing what" emails on new events. You can still change who gets them on each event.</p>
+    catch (err) { box.innerHTML = `<div class="error">${esc(err.message)}</div>`; return; }
+    box.innerHTML = `
+      <div class="toolbar"><h2 style="margin:0">${esc(kindInfo(group).organisers)}</h2><span class="spacer"></span><button class="btn" id="invite">+ Add organiser</button></div>
+      <p class="muted">Organisers can create events, see helpers' contact details and change settings. They log in with an emailed link. Tap a name to correct it. Changes here save straight away.</p>
+      <p class="muted small">Tick <strong>Updates</strong> for the people who should get empty job and "who's doing what" emails on new events. You can still change who gets them on each event.</p>
       <table class="list"><thead><tr><th>Name</th><th class="hide-sm">Email</th><th title="Ticked to get updates on new events">Updates</th><th class="hide-sm">Last login</th><th></th></tr></thead><tbody>
         ${list.map(o => `<tr><td><input type="text" class="inline-edit" data-name="${o.id}" value="${esc(o.name || '')}" placeholder="Add a name" maxlength="80" aria-label="Name for ${esc(o.email)}">${o.id === me.user.id ? ' <span class="badge">You</span>' : ''}<div class="show-sm small muted">${esc(o.email)}</div></td><td class="hide-sm">${esc(o.email)}</td>
           <td><label class="check small" style="margin:0"><input type="checkbox" data-upd="${o.id}" ${o.gets_updates ? 'checked' : ''} aria-label="${esc(o.email)} gets updates on new events"> <span class="hide-sm">New events</span></label></td>
           <td class="hide-sm">${o.last_login ? esc(new Date(o.last_login.replace(' ', 'T') + 'Z').toLocaleDateString('en-AU')) : '<span class="muted">Not yet</span>'}</td>
           <td class="actions">${list.length > 1 ? `<button class="btn danger small" data-rm="${o.id}">Remove</button>` : ''}</td></tr>`).join('')}
       </tbody></table>`;
-    bindNav();
-    $$('[data-name]').forEach(inp => {
+    $$('[data-name]', box).forEach(inp => {
       let saved = inp.value;
       const save = async () => {
         const v = inp.value.trim();
@@ -1296,14 +1457,14 @@
       inp.addEventListener('blur', save);
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } if (e.key === 'Escape') { inp.value = saved; inp.blur(); } });
     });
-    $$('[data-upd]').forEach(c => c.onchange = async () => {
+    $$('[data-upd]', box).forEach(c => c.onchange = async () => {
       try {
         await call(`${A}/organisers/${c.dataset.upd}`, { method: 'PUT', body: { gets_updates: c.checked } });
         toast(c.checked ? 'They\'ll be ticked for updates on new events.' : 'They won\'t be ticked for updates on new events.');
         organisers = null;
       } catch (err) { toast(err.message, 'bad'); c.checked = !c.checked; }
     });
-    $('#invite').onclick = () => modal(`
+    $('#invite', box).onclick = () => modal(`
       <h2>Add an organiser</h2>
       <label>Their name</label><input type="text" id="i-name">
       <label>Their email</label><input type="email" id="i-email">
@@ -1312,16 +1473,16 @@
       <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="i-go">Add and email them</button></div>`,
       (m, close) => {
         $('#i-go', m).onclick = async () => {
-          try { await call(A + '/organisers', { method: 'POST', body: { name: $('#i-name', m).value, email: $('#i-email', m).value } }); close(); toast('Organiser added and emailed.'); showOrganisers(); }
+          try { await call(A + '/organisers', { method: 'POST', body: { name: $('#i-name', m).value, email: $('#i-email', m).value } }); close(); toast('Organiser added and emailed.'); renderOrganisers(box); }
           catch (err) { $('#i-err', m).innerHTML = `<div class="error">${esc(err.message)}</div>`; }
         };
       });
-    $$('[data-rm]').forEach(b => b.onclick = async () => {
+    $$('[data-rm]', box).forEach(b => b.onclick = async () => {
       if (!b.classList.contains('confirm')) { b.classList.add('confirm'); b.textContent = 'Confirm'; setTimeout(() => { b.classList.remove('confirm'); b.textContent = 'Remove'; }, 4000); return; }
       try {
         await call(`${A}/organisers/${b.dataset.rm}`, { method: 'DELETE' });
         if (+b.dataset.rm === me.user.id) return location.replace('/login?choose=1');
-        toast('Organiser removed.'); showOrganisers();
+        toast('Organiser removed.'); renderOrganisers(box);
       } catch (err) { toast(err.message, 'bad'); }
     });
   }
@@ -1338,7 +1499,7 @@
         <div class="toolbar"><h1 style="margin:0">${esc(L.many)}</h1><span class="spacer"></span>
           <button class="btn secondary small" id="t-bulk">+ Add several</button>
           <button class="btn small" id="t-add">+ Add ${esc(lc)}</button></div>
-        <p class="muted">Optional, and only needed if your volunteers belong to smaller groups, such as teams, classes or stalls. Mark which slots belong to each one so parents see just theirs, and share a WhatsApp message with a single ${esc(lc)}.</p>
+        <p class="muted">Optional, and only needed if your volunteers belong to smaller groups, such as teams, classes or stalls. Mark which jobs belong to each one so parents see just theirs, and share a WhatsApp message with a single ${esc(lc)}.</p>
         <p class="muted small">Each ${esc(lc)} has a private page for its ${esc(L.role)}: their upcoming events, who's signed up, and ready-made WhatsApp messages. Use <strong>Share</strong> below each one to send it to them. If you change a ${esc(L.role)}'s email, they get a new link and the old one stops working. If you add a ${esc(L.role)}'s email, they'll also get the unfilled spot and "who's doing what" emails for their ${esc(lc)}'s slots, with the page link. They don't need a login and can't see anyone's contact details. You can change what these are called in ${esc(kindInfo(group).settings)}.</p>
         <div class="stack" id="t-list">${list.map((t, i) => `
           <div class="slot-edit" data-i="${i}">
@@ -1361,7 +1522,7 @@
       });
       $$('[data-rm]').forEach(b => b.onclick = () => {
         const t = list[+b.dataset.rm];
-        if (t.id && !window.confirm(`Remove ${t.name || 'this ' + lc}? Its slots stay in your events, just marked for everyone.`)) return;
+        if (t.id && !window.confirm(`Remove ${t.name || 'this ' + lc}? Its jobs stay in your events, just marked for everyone.`)) return;
         list.splice(+b.dataset.rm, 1); markDirty(); render();
       });
       $$('[data-up]').forEach(b => b.onclick = () => { const i = +b.dataset.up; [list[i - 1], list[i]] = [list[i], list[i - 1]]; markDirty(); render(); });
@@ -1395,7 +1556,7 @@
   function shareTeamPage(t, L) {
     const url = `${location.origin}/team?t=${t.manager_token}`;
     const first = (t.manager_name || '').trim().split(' ')[0];
-    const text = `Hi${first ? ' ' + first : ''}, here's your ${L.role} page for ${t.name} on HelperHub. It shows your ${L.one.toLowerCase()}'s volunteer spots and who's signed up, with ready-made messages to send your parents. It's just for you, so please don't share it.\n\n${url}`;
+    const text = `Hi${first ? ' ' + first : ''}, here's your ${L.role} page for ${t.name} on HelperHub. It shows your ${L.one.toLowerCase()}'s jobs and who's signed up, with ready-made messages to send your parents. It's just for you, so please don't share it.\n\n${url}`;
     const subject = `Your ${L.role} page for ${t.name}`;
     modal(`
       <h2>Share ${esc(t.name)}'s ${esc(L.role)} page</h2>
@@ -1432,14 +1593,14 @@
     const L = T();
     modal(`
       <h2>Copy event</h2>
-      <p class="small muted" style="margin-top:0">Makes a new event with the same details, slots and update schedule, moved to the new date. It starts as a draft. Volunteers aren't copied.</p>
+      <p class="small muted" style="margin-top:0">Makes a new event with the same details, jobs and update schedule, moved to the new date. It starts as a draft. Helpers aren't copied.</p>
       <label for="ce-src" style="margin-top:0">Event to copy</label>
       <select id="ce-src">${sorted.map(e => `<option value="${e.id}" ${e.id === preselectId ? 'selected' : ''}>${esc(e.title)}${e.first_date ? ` (${esc(fmtDateShort(e.first_date))})` : ''}</option>`).join('')}</select>
       <label for="ce-title">New event name</label>
       <input type="text" id="ce-title" maxlength="120" placeholder="e.g. Spring Fete 2027">
       <label for="ce-date">Date of the new event</label>
       <input type="date" id="ce-date">
-      <p class="small muted" style="margin:4px 0 0">Every slot moves by the same number of days, so a multi-day event stays in order.</p>
+      <p class="small muted" style="margin:4px 0 0">Every job moves by the same number of days, so a multi-day event stays in order.</p>
       <div id="ce-teams"></div>
       <div id="ce-err"></div>
       <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="ce-go">Copy event</button></div>`,

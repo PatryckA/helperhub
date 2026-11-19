@@ -19,13 +19,13 @@
       <p>HelperHub is a free volunteer sign-up sheet for P&amp;Cs, sports clubs and community groups. Parents pick a time slot or something to bring in under a minute, and nobody has to create an account.</p>
       <div class="cta">
         <a class="btn" href="/start">Set up your group, free</a>
-        <a class="btn secondary" href="/login">Organiser login</a>
+        <a class="btn secondary hidden" id="example-link" href="/example">See an example</a>
       </div>
     </section>
 
     <div class="features">
       <div class="card"><h3>No ads, no accounts</h3><p>Volunteers just enter their name, email and mobile. No passwords, no app, no clutter.</p></div>
-      <div class="card"><h3>Shifts and bring-a-plate</h3><p>Time slots for canteen or BBQ duty, plus "things to bring" with dietary tags so you don't get five lasagnes.</p></div>
+      <div class="card"><h3>Shifts and bring-a-plate</h3><p>Jobs for canteen or BBQ duty, plus "things to bring" with dietary tags so you don't get five lasagnes.</p></div>
       <div class="card"><h3>Reminders sent for you</h3><p>Confirmation emails with a calendar invite, and a reminder before each shift. Volunteers can cancel with one tap.</p></div>
       <div class="card"><h3>Your colours, your logo</h3><p>Your group gets its own page, like helperhub.au/your-club, with your logo and colours.</p></div>
       <div class="card"><h3>Built for busy committees</h3><p>Copy last year's event in one click, print a sign-in sheet, and add as many organisers as you need.</p></div>
@@ -42,5 +42,9 @@
     <p><a class="btn" href="/start">Get started</a></p>
   </main>
   <script>platformHeader(); siteFooter();</script>
+  <script>
+    // only offer the example if an example group has been set up
+    fetch('/api/g/example/events').then(r => { if (r.ok) document.getElementById('example-link').classList.remove('hidden'); }).catch(() => {});
+  </script>
 </body>
 </html>
