@@ -31,7 +31,7 @@
       <button data-nav="" class="${active === 'events' ? 'active' : ''}">Events</button>
       <button data-nav="teams" class="${active === 'teams' ? 'active' : ''}">${esc(T().many)}</button>
       <button data-nav="settings" class="${active === 'settings' ? 'active' : ''}">${esc(kindInfo(group).settings)}</button>
-      <button data-nav="organisers" class="${active === 'organisers' ? 'active' : ''}">Organisers</button>
+      <button data-nav="organisers" class="${active === 'organisers' ? 'active' : ''}">${esc(kindInfo(group).organisers)}</button>
     </div>`;
   }
   function bindNav() { $$('[data-nav]').forEach(b => b.onclick = () => go(b.dataset.nav)); }
@@ -1050,7 +1050,7 @@ Thank you!</textarea>
     catch (err) { app.innerHTML = `${groupNav('organisers')}<div class="error">${esc(err.message)}</div>`; bindNav(); return; }
     app.innerHTML = `
       ${groupNav('organisers')}
-      <div class="toolbar"><h1 style="margin:0">Organisers</h1><span class="spacer"></span><button class="btn" id="invite">+ Add organiser</button></div>
+      <div class="toolbar"><h1 style="margin:0">${esc(kindInfo(group).organisers)}</h1><span class="spacer"></span><button class="btn" id="invite">+ Add organiser</button></div>
       <p class="muted">Organisers can create events, see volunteers' contact details and change settings. They log in with an emailed link. Tap a name to correct it.</p>
       <p class="muted small">Tick <strong>Updates</strong> for the people who should get unfilled spot and "who's doing what" emails on new events. You can still change who gets them on each event.</p>
       <table class="list"><thead><tr><th>Name</th><th class="hide-sm">Email</th><th title="Ticked to get updates on new events">Updates</th><th class="hide-sm">Last login</th><th></th></tr></thead><tbody>
