@@ -994,6 +994,8 @@ async function adminMessageManagers(request, env, ctx, group, user, id) {
   const subject = req(body.subject, 'Subject', 200);
   const message = req(body.message, 'Message', 10000);
   const withStatus = body.include_status !== false;
+  // what each manager's section shows: jobs (new event), gaps (progress update) or roster (final reminder)
+  const style = ['jobs', 'gaps', 'roster'].includes(body.style) ? body.style : 'gaps';
   const ev = await loadEvent(env, group, id);
   const now = new Date().toISOString();
   const { results: teams } = await env.DB.prepare(`
@@ -1020,11 +1022,22 @@ async function adminMessageManagers(request, env, ctx, group, user, id) {
       const open = mine.filter(sl => sl.left > 0);
       const filled = mine.reduce((n, sl) => n + sl.capacity - sl.left, 0), cap = mine.reduce((n, sl) => n + sl.capacity, 0);
       const team = { id: t.id, name: t.name };
-      const wa = `https://wa.me/?text=${encodeURIComponent(open.length ? gapShareText(env, group, ev, open, team) : rosterShareText(env, group, ev, mine, team))}`;
+      // the WhatsApp message suits the kind of update, falling back if there's nothing to say
+      let text, label;
+      if (style === 'jobs' && open.length) { text = askShareText(env, group, ev, mine, team); label = `Ask ${t.name} parents on WhatsApp`; }
+      else if (style === 'roster' && mine.some(sl => sl.people.length)) { text = rosterShareText(env, group, ev, mine, team); label = `Share ${t.name}'s helpers on WhatsApp`; }
+      else if (open.length) { text = gapShareText(env, group, ev, open, team); label = `Ask ${t.name} parents on WhatsApp`; }
+      else { text = rosterShareText(env, group, ev, mine, team); label = `Share ${t.name}'s helpers on WhatsApp`; }
+      const wa = `https://wa.me/?text=${encodeURIComponent(text)}`;
+      const heading = style === 'jobs'
+        ? `${esc(t.name)}: ${cap} helper${cap === 1 ? '' : 's'} needed`
+        : `${esc(t.name)}: ${filled} of ${cap} spot${cap === 1 ? '' : 's'} filled`;
+      const list = style === 'gaps' ? (open.length ? slotListHtml(open, 'gap', team) : '<p style="color:#15803d">All filled, thank you!</p>')
+        : style === 'jobs' ? slotListHtml(mine, 'gap', team) : slotListHtml(mine, 'roster', team);
       return `<div style="border-top:1px solid #e5e8ec;padding-top:12px;margin-top:12px">
-        <div style="font-weight:bold;font-size:17px">${esc(t.name)}: ${filled} of ${cap} spot${cap === 1 ? '' : 's'} filled</div>
-        ${mine.length ? slotListHtml(mine, 'roster', team) : '<p style="color:#888">No jobs for this team yet.</p>'}
-        ${mine.length ? button(wa, open.length ? `Ask ${t.name} parents on WhatsApp` : `Share ${t.name}'s helpers on WhatsApp`, '#1f8a4c') : ''}
+        <div style="font-weight:bold;font-size:17px">${heading}</div>
+        ${mine.length ? list : '<p style="color:#888">No jobs for this team yet.</p>'}
+        ${mine.length ? button(wa, label, '#1f8a4c') : ''}
         <p style="margin-top:-10px;font-size:14px">Sign-up link for your team: <a href="${eventLink(env, group, ev, t.id)}" style="color:${group.accent}">${eventLink(env, group, ev, t.id)}</a></p>
         <p style="font-size:14px"><a href="${teamPageLink(env, t.page)}" style="color:${group.accent}">Your team page</a>: check your team and share updates any time.</p>
       </div>`;

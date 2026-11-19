@@ -831,50 +831,109 @@
 
   /* ---------------- Message team managers ---------------- */
   function managersModal(ev) {
-    const L = T(), today = new Date().toISOString().slice(0, 10);
+    const L = T(), today = new Date().toISOString().slice(0, 10), lc = L.one.toLowerCase();
     const taking = (teams || []).filter(t => (ev.team_ids || []).includes(t.id));
     const withEmail = taking.filter(t => t.manager_email), without = taking.filter(t => !t.manager_email);
     const url = id => `${location.origin}/${slug}/event/${ev.id}${id ? `?team=${id}` : ''}`;
-    const statusLines = () => taking.map(t => {
-      const mine = ev.slots.filter(s => Number(s.team_id) === t.id && (s.date || '') >= today);
-      const cap = mine.reduce((n, s) => n + s.capacity, 0), filled = mine.reduce((n, s) => n + Math.min(s.capacity, s.signups.length), 0);
-      const open = mine.filter(s => s.signups.length < s.capacity).map(s => s.kind === 'item' ? s.title : `${s.title} ${tShort(s.start_time)}`);
-      return `• ${t.name}: ${filled} of ${cap} filled${open.length ? `. Still need: ${open.join(', ')}` : '. All done, thank you!'}\n  ${url(t.id)}`;
-    }).join('\n');
     const role = L.role, roles = role + 's';
+    const future = ev.slots.filter(s => (s.date || '') >= today);
+    const mineOf = t => future.filter(s => Number(s.team_id) === t.id);
+    const at = s => s.kind === 'item' ? `${s.title} (to bring)` : `${s.title} ${tShort(s.start_time)}`;
+    const name = g => `${g.first_name} ${g.last_name ? g.last_name[0].toUpperCase() + '.' : ''}`.trim();
+
+    // when and where, for the message text
+    const dates = [...new Set(ev.slots.map(s => s.kind === 'item' ? ev.dropoff_date : s.date).filter(Boolean))].sort();
+    const shifts = ev.slots.filter(s => s.kind !== 'item');
+    let when = dates.length > 1 ? `${niceDate(dates[0])} to ${niceDate(dates[dates.length - 1])}` : dates[0] ? niceDate(dates[0]) : 'coming up';
+    if (dates.length === 1 && shifts.length) when += `, ${tShort(shifts.map(s => s.start_time).sort()[0])} to ${tShort(shifts.map(s => s.end_time).sort().pop())}`;
+    const where = ev.location ? ` at ${ev.location}` : '';
+    const daysAway = dates[0] ? Math.round((Date.parse(dates[0]) - Date.parse(today)) / 86400e3) : 99;
+    const soon = daysAway === 0 ? 'today' : daysAway === 1 ? 'tomorrow' : daysAway < 7 ? `this ${new Date(dates[0] + 'T12:00:00Z').toLocaleDateString('en-AU', { weekday: 'long', timeZone: 'UTC' })}` : `on ${niceDate(dates[0] || today)}`;
+
+    // each kind of message: subject, text, what the per-team details show (jobs / gaps / roster / none)
+    const KINDS = {
+      new: { label: 'New event', hint: 'First outreach when the event goes live', style: 'jobs',
+        subject: `${ev.title}: volunteers needed`,
+        text: `Hi everyone,\n\n${ev.title} is on ${when}${where}. Each ${lc} needs a few helpers to make sure the day runs smoothly.\n\nPlease share your ${lc}'s sign-up link with your parents as soon as you can.\n\nThank you!` },
+      progress: { label: 'Progress update', hint: "What's filled and what's still needed", style: 'gaps',
+        subject: `${ev.title}: volunteer update`,
+        text: `Hi everyone,\n\nHere's where we're at with volunteers for ${ev.title}. Please follow up with your parents to fill any remaining spots.\n\nThank you!` },
+      final: { label: 'Final reminder', hint: "A day or two before: who's helping, any gaps", style: 'roster',
+        subject: `${ev.title}: final reminder`,
+        text: `Hi everyone,\n\n${ev.title} is ${soon}. Here's who's helping from your ${lc}. Please check they're still good to go, and let me know about any gaps as soon as possible.\n\nThanks so much!` },
+      thanks: { label: 'Thank you', hint: 'After the event', style: 'none',
+        subject: `Thank you: ${ev.title}`,
+        text: `Hi everyone,\n\nThank you for organising your ${lc}'s helpers for ${ev.title}. It made a big difference on the day. Please pass on our thanks to the parents who helped out.\n\nSee you next time!` },
+    };
+    const filled = ev.slots.reduce((n, s) => n + s.signups.length, 0);
+    let kind = dates.length && dates[dates.length - 1] < today ? 'thanks' : !filled ? 'new' : daysAway <= 2 ? 'final' : 'progress';
+
+    // the per-team lines added to the WhatsApp message
+    const details = style => taking.map(t => {
+      const mine = mineOf(t);
+      if (!mine.length) return `• ${t.name}: no jobs yet`;
+      const cap = mine.reduce((n, s) => n + s.capacity, 0), got = mine.reduce((n, s) => n + Math.min(s.capacity, s.signups.length), 0);
+      const open = mine.filter(s => s.signups.length < s.capacity);
+      if (style === 'jobs') return `• ${t.name}: ${mine.map(s => `${at(s)}${s.capacity > 1 ? ` x${s.capacity}` : ''}`).join(', ')}\n  ${url(t.id)}`;
+      if (style === 'roster') return `• ${t.name}\n${mine.map(s => `  ${at(s)}: ${s.signups.length ? s.signups.map(name).join(', ') : 'nobody yet'}${s.signups.length < s.capacity && s.signups.length ? `, ${s.capacity - s.signups.length} still needed` : ''}`).join('\n')}${open.length ? `\n  ${url(t.id)}` : ''}`;
+      return `• ${t.name}: ${got} of ${cap} filled${open.length ? `. Still need: ${open.map(at).join(', ')}` : '. All done, thank you!'}${open.length ? `\n  ${url(t.id)}` : ''}`;
+    }).join('\n');
+
     modal(`
       <h2>Message ${esc(roles)}</h2>
-      <p class="small muted" style="margin-top:0">${withEmail.length} of ${taking.length} ${esc(L.many.toLowerCase())} taking part have an email for their ${esc(role)}${without.length ? ` (missing: ${esc(without.map(t => t.name).join(', '))}; add them on the ${esc(L.many)} page)` : ''}.</p>
-      <label for="mm-subject" style="margin-top:0">Subject <span class="opt">(email only)</span></label>
-      <input id="mm-subject" type="text" value="${esc(ev.title)}: volunteer update">
-      <label for="mm-msg">Message</label>
-      <textarea id="mm-msg" style="min-height:130px">Hi everyone,
-
-Here's where we're at with volunteers for ${esc(ev.title)}. Please share your ${esc(L.one.toLowerCase())}'s sign-up link with your parents so we can fill the remaining spots.
-
-Thank you!</textarea>
-      <label class="check"><input type="checkbox" id="mm-status" checked> Include each ${esc(L.one.toLowerCase())}'s status and sign-up link</label>
-      <div id="mm-preview" class="small muted" style="white-space:pre-wrap;background:#f6f7f9;border-radius:10px;padding:10px 12px;margin-top:8px;max-height:160px;overflow:auto"></div>
+      <p class="small muted" style="margin-top:0">${withEmail.length} of ${taking.length} ${esc(L.many.toLowerCase())} taking part have an email for their ${esc(role)}${without.length ? ` (missing: ${esc(without.map(t => t.name).join(', '))}; add them on the ${esc(L.many)} tab)` : ''}.</p>
+      <div class="choice" role="radiogroup" aria-label="What kind of message?">${Object.entries(KINDS).map(([k, v]) => `
+        <label class="choice-item"><input type="radio" name="mm-kind" value="${k}" ${k === kind ? 'checked' : ''}>
+          <span><strong>${v.label}</strong><br><span class="small muted">${v.hint}</span></span></label>`).join('')}
+      </div>
+      <label for="mm-subject">Subject <span class="opt">(email only)</span></label>
+      <input id="mm-subject" type="text">
+      <label for="mm-msg">Message <span class="opt">(you can edit it)</span></label>
+      <textarea id="mm-msg" style="min-height:150px"></textarea>
+      <label class="check"><input type="checkbox" id="mm-status"> <span id="mm-status-label"></span></label>
+      <div id="mm-preview" class="small muted" style="white-space:pre-wrap;background:#f6f7f9;border-radius:10px;padding:10px 12px;margin-top:8px;max-height:170px;overflow:auto"></div>
       <div id="mm-err"></div>
       <div class="actions" style="flex-wrap:wrap">
         <button class="btn secondary" id="mm-copy">Copy text</button>
         <button class="btn wa" id="mm-wa">Open WhatsApp</button>
         <button class="btn" id="mm-email" ${withEmail.length ? '' : 'disabled'}>Email ${withEmail.length} ${esc(withEmail.length === 1 ? role : roles)}</button>
       </div>
-      <p class="small muted" style="margin-bottom:0">WhatsApp: pick your ${esc(roles)}' group chat and press send. Email: each ${esc(role)} gets the message plus their own ${esc(L.one.toLowerCase())}'s list and a WhatsApp button for their parents. Replies come to you.</p>`,
+      <p class="small muted" style="margin-bottom:0">WhatsApp: pick your ${esc(roles)}' group chat and press send. Email: each ${esc(role)} gets the message plus just their own ${esc(lc)}'s details, a WhatsApp button for their parents and their ${esc(lc)} page link. Replies come to you.</p>`,
     (m, close) => {
+      const STATUS_LABEL = { jobs: `Include each ${lc}'s jobs and sign-up link`, gaps: `Include each ${lc}'s progress and what's still needed`, roster: `Include who's helping from each ${lc}` };
+      const style = () => KINDS[kind].style;
       const text = () => {
         const msg = $('#mm-msg', m).value.trim();
-        return $('#mm-status', m).checked && taking.length ? `${msg}\n\n${statusLines()}` : msg;
+        return $('#mm-status', m).checked && style() !== 'none' && taking.length ? `${msg}\n\n${details(style())}` : msg;
       };
-      const preview = () => { $('#mm-preview', m).textContent = $('#mm-status', m).checked ? statusLines() : 'Status not included.'; };
-      $('#mm-status', m).onchange = preview; preview();
+      const preview = () => {
+        const on = $('#mm-status', m).checked && style() !== 'none';
+        $('#mm-preview', m).textContent = on ? details(style()) : 'No details included.';
+      };
+      const fill = () => {
+        const k = KINDS[kind];
+        $('#mm-subject', m).value = k.subject;
+        $('#mm-msg', m).value = k.text;
+        const st = $('#mm-status', m);
+        st.checked = k.style !== 'none'; st.disabled = k.style === 'none';
+        $('#mm-status-label', m).textContent = STATUS_LABEL[k.style] || 'No details for this kind of message';
+        preview();
+      };
+      $$('[name=mm-kind]', m).forEach(r => r.onchange = () => {
+        const changed = $('#mm-msg', m).value.trim() !== KINDS[kind].text.trim();
+        if (changed && !window.confirm('Replace your edited message with the new template?')) { $(`[name=mm-kind][value=${kind}]`, m).checked = true; return; }
+        kind = r.value; fill();
+      });
+      $('#mm-status', m).onchange = preview;
+      fill();
       $('#mm-copy', m).onclick = () => navigator.clipboard && navigator.clipboard.writeText(text()).then(() => toast('Message copied.'), () => {});
       $('#mm-wa', m).onclick = () => { window.open('https://wa.me/?text=' + encodeURIComponent(text()), '_blank', 'noopener'); };
       $('#mm-email', m).onclick = async () => {
         const btn = $('#mm-email', m); btn.disabled = true; btn.textContent = 'Sending…';
         try {
-          const r = await call(`${A}/events/${ev.id}/managers`, { method: 'POST', body: { subject: $('#mm-subject', m).value, message: $('#mm-msg', m).value, include_status: $('#mm-status', m).checked } });
+          const r = await call(`${A}/events/${ev.id}/managers`, { method: 'POST', body: {
+            subject: $('#mm-subject', m).value, message: $('#mm-msg', m).value,
+            include_status: $('#mm-status', m).checked && style() !== 'none', style: style() } });
           close(); toast(`Sent to ${r.queued} ${r.queued === 1 ? role : roles}.`);
         } catch (err) { $('#mm-err', m).innerHTML = `<div class="error">${esc(err.message)}</div>`; btn.disabled = false; btn.textContent = 'Try again'; }
       };
