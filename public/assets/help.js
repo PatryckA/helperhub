@@ -62,7 +62,7 @@
           hasTeams ? `<strong>${L.many} taking part:</strong> tick the ${many} involved in this event.` : null,
           `<strong>Time slots:</strong> one slot is one job at one time, e.g. "BBQ, 10am to 11am, 2 people". <em>+ Add a run of shifts</em> makes back-to-back slots in one go.`,
           `<strong>Things to bring:</strong> e.g. "Slice, 6 needed" or "Raffle prizes". Tick "This is food" to ask about dietary needs.`,
-          hasTeams ? `<strong>For:</strong> each slot or item can be for everyone, or for ${many}. Pick "All taking part" for jobs every ${one} does (e.g. a scorer each), or tick particular ${many}.` : null,
+          hasTeams ? `<strong>For:</strong> each slot or item can be for everyone, or for ${many}. Pick "All taking part" for jobs every ${one} does (e.g. a scorer each), or tick particular ${many}. New things to bring start as one per ${one}, so you can see which ${many} have brought theirs.` : null,
           `<strong>Organiser updates:</strong> choose who gets emails about empty spots (default 3 days before) and who's doing what (default the day before). Each email has a button to share it on WhatsApp.`,
         ].filter(Boolean)),
       },

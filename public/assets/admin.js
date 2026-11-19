@@ -683,7 +683,14 @@
       <p class="small muted" style="margin:0 0 10px">Tick the ${esc(L.many.toLowerCase())} at this event. Jobs set to "Each ${esc(L.one.toLowerCase())} taking part" are created for every ticked one.</p>
       <div class="chip-checks">${teams.map(t => `<label class="chip-check"><input type="checkbox" value="${t.id}" ${chosen.has(t.id) ? 'checked' : ''}> ${esc(t.name)}</label>`).join('')}</div>
       <p class="small" style="margin:10px 0 0"><a href="#" id="taking-all">Tick all</a> · <a href="#" id="taking-none">Clear</a></p>`;
-    const update = () => { current.team_ids = $$('#taking input:checked').map(c => +c.value); markDirty(); renderSlots(); };
+    const update = () => {
+      const had = (current.team_ids || []).length;
+      current.team_ids = $$('#taking input:checked').map(c => +c.value);
+      // first teams ticked: things to bring that nobody has signed up for switch to one per team
+      if (!had && current.team_ids.length) for (const r of current.rows)
+        if (r.kind === 'item' && !r.each_team && !(r.signups || []).length) Object.assign(r, { each_team: true, for_teams: null, team_id: null, team_slot_ids: {}, id: undefined });
+      markDirty(); renderSlots();
+    };
     $$('#taking input').forEach(c => c.onchange = update);
     $('#taking-all').onclick = e => { e.preventDefault(); $$('#taking input').forEach(c => { c.checked = true; }); update(); };
     $('#taking-none').onclick = e => { e.preventDefault(); $$('#taking input').forEach(c => { c.checked = false; }); update(); };
@@ -697,7 +704,10 @@
 
   function addItem() {
     dropBlankStarter();
-    current.rows.push({ kind: 'item', title: '', details: '', capacity: 4, is_food: 0, signups: [] });
+    // with teams taking part, things to bring default to "each team" so every team's share is tracked
+    const perTeam = takingTeams().length > 0;
+    current.rows.push({ kind: 'item', title: '', details: '', capacity: perTeam ? 1 : 4, is_food: 0, signups: [],
+      ...(perTeam ? { each_team: true, for_teams: null, team_id: null, team_slot_ids: {} } : {}) });
     markDirty(); renderSlots();
     const els = $$('#items .slot-edit'); const last = els[els.length - 1];
     last.scrollIntoView({ behavior: 'smooth', block: 'center' }); $('input', last).focus();
