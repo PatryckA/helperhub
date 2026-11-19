@@ -289,3 +289,21 @@ table.list td.actions { white-space: nowrap; text-align: right; }
 .fold-card:not(.open) > :not(h2:first-child) { display: none; }
 .badge.archived { background: #eef0f3; color: #5b6573; }
 .archived-list > summary { cursor: pointer; list-style: revert; }
+/* Help panel */
+.help-link { background: rgba(255,255,255,.18); border-radius: 999px; padding: 3px 10px !important; }
+.help-panel { max-width: 560px; max-height: 88vh; overflow-y: auto; }
+.help-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.help-sec { border-top: 1px solid var(--line); padding: 4px 0; }
+.help-sec > summary { cursor: pointer; font-weight: 700; font-size: 17px; padding: 10px 0; list-style: revert; }
+.help-body { padding: 0 0 10px; }
+.help-steps { padding-left: 0; list-style: none; margin: 6px 0; }
+.help-steps > li { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; line-height: 1.45; }
+ol.help-steps { counter-reset: hs; }
+ol.help-steps > li:not(:has(.help-tick))::before { counter-increment: hs; content: counter(hs); flex: none; width: 24px; height: 24px; border-radius: 50%; background: #eef3f2; color: var(--accent); font-weight: 700; font-size: 13px; display: grid; place-items: center; }
+.help-tick { flex: none; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; font-size: 13px; font-weight: 700; color: var(--muted); }
+.help-tick.on { background: var(--ok); border-color: var(--ok); color: #fff; }
+.help-list { padding-left: 20px; margin: 6px 0; }
+.help-list li { margin: 8px 0; line-height: 1.45; }
+.help-qa { border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; margin: 8px 0; }
+.help-qa > summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
+.help-qa > div { padding: 0 0 10px; }

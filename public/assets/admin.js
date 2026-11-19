@@ -114,6 +114,7 @@
         <p class="small muted">Hidden from volunteers, with no reminders or updates. Open one to restore it.</p>${table(archived, '')}</details>` : ''}
       ${emailStatusHtml(status)}`;
     $('#new').onclick = () => go('new');
+    maybeFirstHelp();
     if ($('#archive-past')) $('#archive-past').onclick = async () => {
       if (!window.confirm(`Archive ${past.length} past event${past.length === 1 ? '' : 's'}? They're kept and can be restored any time.`)) return;
       try { const r = await call(A + '/events/archive-past', { method: 'POST' }); toast(`${r.archived} event${r.archived === 1 ? '' : 's'} archived.`); showList(); }
@@ -1064,9 +1065,28 @@
 
 
   /* ---------------- Header ---------------- */
+  // Help for whatever screen the organiser is on; opens by itself the first time they visit
+  async function openHelp(first) {
+    const h = location.hash.slice(1);
+    const page = h === 'settings' ? 'settings' : h === 'organisers' ? 'organisers' : h === 'teams' ? 'teams'
+      : h === 'new' ? 'editor' : /^event\/\d+\/volunteers$/.test(h) ? 'volunteers' : /^event\/\d+$/.test(h) ? (tab === 'volunteers' ? 'volunteers' : 'editor') : 'events';
+    let events = [];
+    try { ({ events } = await call(A + '/events')); } catch { /* help still works without the list */ }
+    HHHelp.organiser({ group, teams, events, page, first, go: hash => go(hash) });
+  }
+  function maybeFirstHelp() {
+    try {
+      const k = 'hh_help_seen_' + slug;
+      if (localStorage.getItem(k)) return;
+      localStorage.setItem(k, '1');
+      openHelp(true);
+    } catch { /* storage blocked: skip */ }
+  }
+
   function renderHeader() {
-    groupHeader(group, `<a href="/${esc(slug)}" target="_blank">View page</a>${me.groups.length > 1 || me.is_owner ? '<a href="/login?choose=1">My groups</a>' : ''}${me.is_owner ? '<a href="/owner">Owner</a>' : ''}<a href="#" id="hdr-logout">Log out</a>`);
+    groupHeader(group, `<a href="#" id="hdr-help" class="help-link">Help</a><a href="/${esc(slug)}" target="_blank">View page</a>${me.groups.length > 1 || me.is_owner ? '<a href="/login?choose=1">My groups</a>' : ''}${me.is_owner ? '<a href="/owner">Owner</a>' : ''}<a href="#" id="hdr-logout">Log out</a>`);
     $('#hdr-logout').onclick = e => { e.preventDefault(); logout(); };
+    $('#hdr-help').onclick = e => { e.preventDefault(); openHelp(false); };
     document.title = `${group.name} | HelperHub organisers`;
   }
 

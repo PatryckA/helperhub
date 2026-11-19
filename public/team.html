@@ -8,6 +8,7 @@
   <link rel="icon" href="/favicon.svg">
   <link rel="stylesheet" href="/assets/hh.css">
   <script src="/assets/hh.js"></script>
+  <script src="/assets/help.js"></script>
 </head>
 <body>
   <header id="site-header"></header>
@@ -32,7 +33,9 @@
       const box = $('#content');
       try {
         const data = await api('/api/team/' + encodeURIComponent(token));
-        groupHeader(data.group); siteFooter(data.group);
+        groupHeader(data.group, '<a href="#" id="hdr-help" class="help-link">Help</a>'); siteFooter(data.group);
+        $('#hdr-help').onclick = e => { e.preventDefault(); HHHelp.manager({ group: data.group, team: data.team.name, role: data.role,
+          contact: data.contact.email ? `<a href="mailto:${esc(data.contact.email)}">${esc(data.contact.name || data.contact.email)}</a>` : '' }); };
         const role = data.role.charAt(0).toUpperCase() + data.role.slice(1);
         document.title = `${data.team.name}: ${role} page`;
         box.innerHTML = `
