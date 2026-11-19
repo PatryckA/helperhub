@@ -167,12 +167,10 @@
       </div>
       ${ev.archived ? `<div class="notice" style="margin-top:10px">This event is archived: volunteers can't see it and no reminders or updates are sent. <button class="btn small secondary" id="unarchive" style="margin-left:6px">Restore</button></div>` : ''}
       ${saved ? `<div class="action-list" style="margin-top:12px">
-        ${(ev.team_ids || []).length ? `<button class="action-row" id="managers"><strong>Message ${esc(T().role)}s</strong>
-          <span>Email each ${esc(T().role)} their ${esc(T().one.toLowerCase())}'s progress, or post an update in your ${esc(T().role)}s' group chat</span></button>` : ''}
-        <button class="action-row wa" id="share"><strong>Post to ${esc(kindInfo(group).people)}' WhatsApp group</strong>
-          <span>A ready-made message asking for helpers, with the sign-up link</span></button>
-        <button class="action-row" id="mail"><strong>Email people signed up</strong>
-          <span>Send a message to everyone already volunteering for this event</span></button>
+        ${(ev.team_ids || []).length ? `<button class="action-row" id="managers"><strong>Send message to ${esc(T().role)}s</strong>
+          <span>Templates for communicating with ${esc(T().role)}s, such as asking for helpers or updates on help still needed</span></button>` : ''}
+        <button class="action-row" id="share"><strong>Send message to everyone</strong>
+          <span>Templates for communicating across ${esc(T().many.toLowerCase())}, such as broad calls for helpers and broad updates</span></button>
       </div>
       <div class="toolbar" style="margin-top:10px">
         <button class="btn secondary small" id="print">Print sign-in sheet</button>
@@ -222,7 +220,7 @@
       $('#copylink').onclick = () => copyLink(ev.id);
       $('#dup').onclick = () => copyEventModal(ev.id);
       $('#print').onclick = () => printSignIn(ev);
-      $('#mail').onclick = () => emailModal(ev);
+      if ($('#mail')) $('#mail').onclick = () => emailModal(ev);
       $('#del').onclick = () => deleteModal(ev);
       const setArchived = async on => {
         try {
@@ -504,8 +502,8 @@
     const evTeams = (teams || []).filter(t => ev.slots.some(s => Number(s.team_id) === t.id));
     if (!ev.published) toast('This event is a draft. Tick "Live" and save so people can sign up.', 'bad');
     modal(`
-      <h2>Post to ${esc(kindInfo(group).people)}' WhatsApp group</h2>
-      <p class="small muted" style="margin-top:-6px">Pick a ready-made message, then choose which group chat to post it in.</p>
+      <h2>Send message to everyone</h2>
+      <p class="small muted" style="margin-top:-6px">Pick a ready-made message, then post it in a WhatsApp group, or email it to the people already signed up.</p>
       ${evTeams.length ? `<label for="share-team" style="margin-top:0">Who is it for?</label>
       <select id="share-team"><option value="">Everyone (all ${esc(T().many.toLowerCase())})</option>${evTeams.map(t => `<option value="${t.id}">${esc(t.name)} only</option>`).join('')}</select>
       <p class="small muted" style="margin:4px 0 10px">Pick one to share just their jobs in their own chat. The link then shows only their slots (plus any for everyone).</p>` : ''}
@@ -518,9 +516,10 @@
       <div id="share-empty"></div>
       <div class="actions" style="flex-wrap:wrap">
         <button class="btn secondary" id="share-copy">Copy text</button>
-        <button class="btn wa" id="share-go">Open WhatsApp</button>
+        <button class="btn secondary" id="share-email">Email people signed up</button>
+        <button class="btn wa" id="share-go">Post in WhatsApp</button>
       </div>
-      <p class="small muted" style="margin-bottom:0">WhatsApp opens with this message. Pick the group and press send. <a href="#" id="share-link">Copy the sign-up link only</a></p>`,
+      <p class="small muted" style="margin-bottom:0">WhatsApp opens with this message: pick the group and press send. Email goes to everyone already signed up for this event. <a href="#" id="share-link">Copy the sign-up link only</a></p>`,
     (m, close) => {
       const fill = () => {
         const t = SHARE[kind].text(ev);
@@ -542,6 +541,7 @@
         if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Message copied.'), () => {});
       };
       $('#share-link', m).onclick = e => { e.preventDefault(); copyLink(ev.id, shareScope?.id); };
+      $('#share-email', m).onclick = () => emailModal(ev, $('#share-text', m).value.trim());
     });
   }
 
@@ -921,7 +921,7 @@
     }).join('\n');
 
     modal(`
-      <h2>Message ${esc(roles)}</h2>
+      <h2>Send message to ${esc(roles)}</h2>
       <p class="small muted" style="margin:-6px 0 8px">Email each ${esc(role)} their own ${esc(lc)}'s details, or post one update in your ${esc(roles)}' group chat.</p>
       <p class="small muted" style="margin-top:0">${withEmail.length} of ${taking.length} ${esc(L.many.toLowerCase())} taking part have an email for their ${esc(role)}${without.length ? ` (missing: ${esc(without.map(t => t.name).join(', '))}; add them on the ${esc(L.many)} tab)` : ''}.</p>
       <div class="choice" role="radiogroup" aria-label="What kind of message?">${Object.entries(KINDS).map(([k, v]) => `
@@ -982,7 +982,7 @@
     });
   }
 
-  async function emailModal(ev) {
+  async function emailModal(ev, prefill) {
     let status;
     try { status = await call(A + '/status'); } catch { return; }
     const people = new Set(ev.slots.flatMap(s => s.signups.map(g => g.email.toLowerCase())));
@@ -993,7 +993,7 @@
       <select id="m-to"><option value="">Everyone signed up (${people.size} ${people.size === 1 ? 'person' : 'people'})</option>
         ${ev.slots.filter(s => s.signups.length).map(s => `<option value="${s.id}">Only: ${s.kind === 'item' ? 'Bring: ' + esc(slotName(s)) : `${esc(fmtDateShort(s.date))} ${fmtTime(s.start_time)}, ${esc(slotName(s))}`} (${s.signups.length})</option>`).join('')}</select>
       <label>Subject</label><input type="text" id="m-subj" value="${esc(ev.title)}: update">
-      <label>Message</label><textarea id="m-msg" style="min-height:160px" placeholder="Each email starts with 'Hi [first name],' automatically."></textarea>
+      <label>Message</label><textarea id="m-msg" style="min-height:160px" placeholder="Each email starts with 'Hi [first name],' automatically.">${esc((prefill || '').replace(/^\s*(hi|hello|hey) everyone,?\s*/i, ''))}</textarea>
       <p class="small muted">${status.remaining_24h} emails left today (limit ${status.daily_limit}). Extras wait in the queue and send automatically within the next day.${ev.contact_email ? ` Replies go to ${esc(ev.contact_email)}.` : ''}</p>
       <div id="m-err"></div>
       <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="m-go" ${people.size ? '' : 'disabled'}>Send</button></div>`,
