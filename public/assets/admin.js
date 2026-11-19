@@ -98,27 +98,34 @@
     const welcome = new URLSearchParams(location.search).has('welcome');
     if (welcome) history.replaceState(null, '', location.pathname + location.hash);
     app.innerHTML = `
-      ${welcome ? `<div class="success" style="margin-top:18px"><strong>Welcome to HelperHub!</strong> Your group is live at <a href="/${esc(slug)}" target="_blank">helperhub.au/${esc(slug)}</a>. Start with <a href="#settings">Group settings</a> to add your logo and colours, then create your first event.</div>` : ''}
+      ${welcome ? `<div class="success" style="margin-top:18px"><strong>Welcome to HelperHub!</strong> Your group is live at <a href="/${esc(slug)}" target="_blank">helperhub.au/${esc(slug)}</a>. Start with <a href="#settings">${esc(kindInfo(group).settings)}</a> to add your logo and colours, then create your first event.</div>` : ''}
       ${groupNav('events')}
       <div class="toolbar">
         <h1 style="margin:0">Events</h1><span class="spacer"></span>
         ${events.length ? '<button class="btn secondary" id="copymany">Copy several</button>' : ''}
         <button class="btn" id="new">+ New event</button>
       </div>
-      ${emailStatusHtml(status)}
+      ${emailWarningsHtml(status)}
       <h2>Upcoming and drafts</h2>${table(upcoming, 'No upcoming events yet. Create one, or duplicate a past event.')}
-      ${past.length ? `<h2>Past</h2>${table(past, '')}` : ''}`;
+      ${past.length ? `<h2>Past</h2>${table(past, '')}` : ''}
+      ${emailStatusHtml(status)}`;
     $('#new').onclick = () => go('new');
     if ($('#copymany')) $('#copymany').onclick = () => copyManyModal(events);
     bindNav();
     $$('tr.click').forEach(tr => tr.onclick = () => go('event/' + tr.dataset.id));
   }
 
-  function emailStatusHtml(s) {
+  // problems worth seeing straight away stay at the top of the page
+  function emailWarningsHtml(s) {
     const modeNote = s.email_provider === 'log' ? `<div class="notice">HelperHub is in <strong>test mode</strong>: emails are not being sent yet.</div>` : '';
     const failNote = s.failed_7d ? `<div class="error">${s.failed_7d} email(s) couldn't be sent in the last 7 days. If this keeps happening, contact HelperHub.</div>` : '';
-    return `${modeNote}${failNote}
-      <div class="card small" style="margin-top:14px">
+    return modeNote + failNote;
+  }
+
+  // the routine email counts sit at the bottom of the events page
+  function emailStatusHtml(s) {
+    return `
+      <div class="card small muted" style="margin-top:28px">
         <span class="stat"><b>${s.sent_24h}</b>emails sent (24h)</span>
         <span class="stat"><b>${s.remaining_24h}</b>left today (limit ${s.daily_limit})</span>
         <span class="stat"><b>${s.queued}</b>waiting in queue</span>
