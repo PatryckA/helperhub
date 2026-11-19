@@ -262,3 +262,5 @@ table.list td.actions { white-space: nowrap; text-align: right; }
 .list input[type=text].inline-edit::placeholder { color: var(--muted); font-style: italic; }
 .list td:first-child { min-width: 7em; }
 .list td { overflow-wrap: anywhere; }
+.show-sm { display: none; }
+@media (max-width: 640px) { .show-sm { display: block; margin-top: 2px; } }

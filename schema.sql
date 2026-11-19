@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS memberships (
   group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  gets_updates INTEGER NOT NULL DEFAULT 0,        -- 1 = ticked for organiser updates on new events
   PRIMARY KEY (group_id, user_id)
 );
 
@@ -85,6 +86,7 @@ CREATE TABLE IF NOT EXISTS events (
   gap_alerts   TEXT,                               -- unfilled-spot alert dates, comma list; NULL = default (3 days before)
   gap_alert_emails TEXT NOT NULL DEFAULT '',       -- extra organisers who get the alerts, comma list
   gap_alerts_sent TEXT NOT NULL DEFAULT '',        -- alert dates already sent
+  update_to    TEXT,                               -- who gets updates (comma list of emails); NULL = contact + gap_alert_emails (older events)
   roster_alerts TEXT,                              -- "who's doing what" email dates; NULL = default (1 day before)
   roster_alerts_sent TEXT NOT NULL DEFAULT '',
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))

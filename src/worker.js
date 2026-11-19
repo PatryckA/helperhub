@@ -625,7 +625,7 @@ async function deleteLogo(env, group) {
 
 async function listOrganisers(env, group) {
   const { results } = await env.DB.prepare(
-    `SELECT u.id, u.email, u.name, u.last_login, m.created_at FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.group_id = ? ORDER BY m.created_at`
+    `SELECT u.id, u.email, u.name, u.last_login, m.created_at, m.gets_updates FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.group_id = ? ORDER BY m.created_at`
   ).bind(group.id).all();
   return json({ organisers: results });
 }
@@ -633,11 +633,12 @@ async function listOrganisers(env, group) {
 // Fix an organiser's name (any organiser of the group can do this)
 async function renameOrganiser(request, env, group, userId) {
   const b = await readJson(request);
-  const name = opt(b.name, 80);
   const member = await env.DB.prepare(`SELECT 1 FROM memberships WHERE group_id = ? AND user_id = ?`).bind(group.id, userId).first();
   if (!member) throw httpError(404, 'Organiser not found.');
-  await env.DB.prepare(`UPDATE users SET name = ? WHERE id = ?`).bind(name, userId).run();
-  return json({ ok: true, name });
+  if ('name' in b) await env.DB.prepare(`UPDATE users SET name = ? WHERE id = ?`).bind(opt(b.name, 80), userId).run();
+  // whether they're ticked for updates on new events
+  if ('gets_updates' in b) await env.DB.prepare(`UPDATE memberships SET gets_updates = ? WHERE group_id = ? AND user_id = ?`).bind(b.gets_updates ? 1 : 0, group.id, userId).run();
+  return json({ ok: true });
 }
 
 async function inviteOrganiser(request, env, ctx, group, inviter) {
@@ -726,6 +727,7 @@ async function adminSaveEvent(request, env, group, id) {
   ev.gap_alerts = readGapAlerts(body.gap_alerts);
   ev.roster_alerts = readGapAlerts(body.roster_alerts);
   ev.gap_alert_emails = await readAlertEmails(env, group, body.gap_alert_emails);
+  ev.update_to = await readUpdateTo(env, group, body.update_to, ev.contact_email);
   const tz = group.timezone;
   const { results: groupTeams } = await env.DB.prepare(`SELECT id, name FROM teams WHERE group_id = ? ORDER BY sort_order, id`).bind(group.id).all();
   const teamIds = new Set(groupTeams.map(t => t.id));
@@ -787,16 +789,16 @@ async function adminSaveEvent(request, env, group, id) {
     const { n } = await env.DB.prepare(`SELECT COUNT(*) AS n FROM events WHERE group_id = ?`).bind(group.id).first();
     if (n >= 500) throw httpError(400, 'This group has a lot of events. Please delete some old ones first.');
     const r = await env.DB.prepare(`INSERT INTO events (group_id, title, description, location, contact_name, contact_email, published,
-      dropoff_date, dropoff_time, dropoff_note, donation_url, donation_text, gap_alerts, gap_alert_emails, roster_alerts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      dropoff_date, dropoff_time, dropoff_note, donation_url, donation_text, gap_alerts, gap_alert_emails, roster_alerts, update_to) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(group.id, ev.title, ev.description, ev.location, ev.contact_name, ev.contact_email, ev.published,
-        ev.dropoff_date, ev.dropoff_time, ev.dropoff_note, ev.donation_url, ev.donation_text, ev.gap_alerts, ev.gap_alert_emails, ev.roster_alerts).run();
+        ev.dropoff_date, ev.dropoff_time, ev.dropoff_note, ev.donation_url, ev.donation_text, ev.gap_alerts, ev.gap_alert_emails, ev.roster_alerts, ev.update_to).run();
     id = r.meta.last_row_id;
   } else {
     await loadEvent(env, group, id);
     stmts.push(env.DB.prepare(`UPDATE events SET title=?, description=?, location=?, contact_name=?, contact_email=?, published=?,
-      dropoff_date=?, dropoff_time=?, dropoff_note=?, donation_url=?, donation_text=?, gap_alerts=?, gap_alert_emails=?, roster_alerts=? WHERE id=? AND group_id=?`)
+      dropoff_date=?, dropoff_time=?, dropoff_note=?, donation_url=?, donation_text=?, gap_alerts=?, gap_alert_emails=?, roster_alerts=?, update_to=? WHERE id=? AND group_id=?`)
       .bind(ev.title, ev.description, ev.location, ev.contact_name, ev.contact_email, ev.published,
-        ev.dropoff_date, ev.dropoff_time, ev.dropoff_note, ev.donation_url, ev.donation_text, ev.gap_alerts, ev.gap_alert_emails, ev.roster_alerts, id, group.id));
+        ev.dropoff_date, ev.dropoff_time, ev.dropoff_note, ev.donation_url, ev.donation_text, ev.gap_alerts, ev.gap_alert_emails, ev.roster_alerts, ev.update_to, id, group.id));
     const { results: existing } = await env.DB.prepare(
       `SELECT s.id, s.title, t.name AS team, (SELECT COUNT(*) FROM signups WHERE slot_id = s.id) AS n FROM slots s LEFT JOIN teams t ON t.id = s.team_id WHERE s.event_id = ?`).bind(id).all();
     const keep = new Set(slots.filter(s => s.id).map(s => s.id));
@@ -888,10 +890,10 @@ async function duplicateOne(env, group, src, shift, title, teamIds) {
   }
   const shiftList = v => v ? v.split(',').map(d => addDays(d, shift)).join(',') : (v ?? null);
   const r = await env.DB.prepare(`INSERT INTO events (group_id, title, description, location, contact_name, contact_email, published,
-    dropoff_date, dropoff_time, dropoff_note, donation_url, donation_text, gap_alerts, gap_alert_emails, roster_alerts) VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,?)`)
+    dropoff_date, dropoff_time, dropoff_note, donation_url, donation_text, gap_alerts, gap_alert_emails, roster_alerts, update_to) VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?)`)
     .bind(group.id, title, src.description, src.location, src.contact_name, src.contact_email,
       src.dropoff_date ? addDays(src.dropoff_date, shift) : '', src.dropoff_time, src.dropoff_note, src.donation_url, src.donation_text,
-      shiftList(src.gap_alerts), src.gap_alert_emails || '', shiftList(src.roster_alerts)).run();
+      shiftList(src.gap_alerts), src.gap_alert_emails || '', shiftList(src.roster_alerts), src.update_to ?? null).run();
   const newId = r.meta.last_row_id;
   const stmts = out.map(s => {
     const date = addDays(s.date, shift);
@@ -1163,6 +1165,16 @@ function readGapAlerts(v) {
   return dates.join(',');
 }
 
+// The exact list of people who get this event's updates: organisers, or the event contact. null = older event (contact + extras).
+async function readUpdateTo(env, group, v, contactEmail) {
+  if (!Array.isArray(v)) return null;
+  const list = [...new Set(v.map(e => String(e || '').trim().toLowerCase()).filter(Boolean))];
+  const { results } = await env.DB.prepare(`SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.group_id = ?`).bind(group.id).all();
+  const allowed = new Set(results.map(r => r.email.toLowerCase()));
+  for (const c of [contactEmail, group.contact_email]) if (c) allowed.add(c.toLowerCase());
+  return list.filter(e => allowed.has(e)).join(',');
+}
+
 async function readAlertEmails(env, group, v) {
   const list = [...new Set((Array.isArray(v) ? v : []).map(e => String(e || '').trim().toLowerCase()).filter(Boolean))];
   if (!list.length) return '';
@@ -1222,6 +1234,13 @@ async function organiserRecipients(env, group, ev) {
   const main = (ev.contact_email || group.contact_email || '').toLowerCase();
   const { results: orgs } = await env.DB.prepare(`SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.group_id = ?`).bind(group.id).all();
   const members = orgs.map(o => o.email.toLowerCase());
+  // chosen list: exactly those people (current organisers, or the contact); if nobody is ticked, fall back below
+  if (ev.update_to !== null && ev.update_to !== undefined) {
+    const picked = ev.update_to.split(',').filter(e => e && (members.includes(e) || e === main));
+    if (picked.length) return [...new Set(picked)];
+    if (main) return [main];
+    return members;
+  }
   if (main) recipients.add(main); else members.forEach(e => recipients.add(e)); // no contact set: tell every organiser
   for (const e of (ev.gap_alert_emails || '').split(',').filter(Boolean)) if (members.includes(e)) recipients.add(e);
   return [...recipients];

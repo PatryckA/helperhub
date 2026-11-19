@@ -248,8 +248,11 @@
     if (!ev._sched) {
       const load = v => (v === null || v === undefined) ? { auto: true, dates: [] } : { auto: false, dates: v ? v.split(',') : [] };
       ev._sched = { gap: load(ev.gap_alerts), roster: load(ev.roster_alerts) };
-      ev._alertEmails = ev.gap_alert_emails ? ev.gap_alert_emails.split(',') : [];
+      // who gets the updates: an exact list once chosen; older events keep contact + extras; new events start from the defaults
+      const legacy = [ev.contact_email, ...(ev.gap_alert_emails ? ev.gap_alert_emails.split(',') : [])].filter(Boolean).map(e => e.toLowerCase());
+      ev._updateTo = ev.update_to !== null && ev.update_to !== undefined ? ev.update_to.split(',').filter(Boolean) : ev.id ? [...new Set(legacy)] : null;
     }
+    $('#f-ce').addEventListener('change', () => renderAlerts());
     $('#f-dd').addEventListener('input', () => renderAlerts());
     renderTaking();
     renderSlots();
@@ -280,7 +283,13 @@
     if (!box || !ev._sched) return;
     const first = firstDate();
     const contact = (ev.contact_email || group.contact_email || '').toLowerCase();
-    const others = (organisers || []).filter(o => o.email.toLowerCase() !== contact);
+    if (ev._updateTo === null && organisers !== null) ev._updateTo = organisers.filter(o => o.gets_updates).map(o => o.email.toLowerCase());
+    const chosen = new Set(ev._updateTo || []);
+    // everyone who could get updates: the organisers, plus the event contact if they aren't one
+    const people = (organisers || []).map(o => ({ email: o.email.toLowerCase(), label: o.name ? `${o.name} (${o.email})` : o.email, isContact: o.email.toLowerCase() === contact }));
+    if (contact && !people.some(p => p.email === contact)) people.unshift({ email: contact, label: contact, isContact: true, outside: true });
+    for (const e of chosen) if (!people.some(p => p.email === e)) people.push({ email: e, label: `${e} (no longer an organiser)`, gone: true });
+    const fallback = contact ? esc(contact) + ' (the contact)' : 'every organiser';
     const block = kind => {
       const st = ev._sched[kind], dates = schedDates(kind), def = SCHED[kind].days;
       return `
@@ -299,14 +308,16 @@
     };
     box.innerHTML = `
       <h2 style="margin:0 0 4px">Organiser updates</h2>
-      <p class="small muted" style="margin:0">Sent to ${contact ? esc(contact) : 'every organiser'}. Use Share on WhatsApp at the top of the event to share any time.</p>
+      <p class="small muted" style="margin:0">Emailed to the people ticked below. Use Share on WhatsApp at the top of the event to share any time.</p>
       ${block('gap')}
       ${block('roster')}
       <div style="margin-top:16px">
-        <div class="small" style="font-weight:600">Also send these updates to</div>
+        <div class="small" style="font-weight:600">Who gets these updates</div>
         ${organisers === null ? '<p class="small muted" style="margin:4px 0 0">Loading organisers…</p>'
-          : others.length ? others.map(o => `<label class="check small" style="margin:6px 0 0"><input type="checkbox" data-alert-to="${esc(o.email.toLowerCase())}" ${ev._alertEmails.includes(o.email.toLowerCase()) ? 'checked' : ''}> ${esc(o.name ? `${o.name} (${o.email})` : o.email)}</label>`).join('')
-          : '<p class="small muted" style="margin:4px 0 0">No other organisers yet. Add them on the Organisers page.</p>'}
+          : people.map(p => `<label class="check small" style="margin:6px 0 0"><input type="checkbox" data-alert-to="${esc(p.email)}" ${chosen.has(p.email) ? 'checked' : ''}> ${esc(p.label)}${p.isContact ? ' <span class="badge">Contact</span>' : ''}</label>`).join('')}
+        ${organisers !== null && !chosen.size ? `<p class="small muted" style="margin:6px 0 0">Nobody ticked, so they'll go to ${fallback}.</p>` : ''}
+        ${(teams || []).length ? `<p class="small muted" style="margin:6px 0 0">${esc(T().role.charAt(0).toUpperCase() + T().role.slice(1))}s also get updates for their own ${esc(T().one.toLowerCase())}'s slots.</p>` : ''}
+        <p class="small muted" style="margin:6px 0 0">Choose who's ticked for new events on the Organisers page.</p>
       </div>`;
     const explicit = kind => { const st = ev._sched[kind]; if (st.auto) { st.dates = schedDates(kind).filter(Boolean); st.auto = false; } return st; };
     $$('[data-sched]', box).forEach(inp => inp.addEventListener('change', () => {
@@ -316,9 +327,9 @@
     $$('[data-sched-add]', box).forEach(b => b.onclick = () => { explicit(b.dataset.schedAdd).dates.push(''); markDirty(); renderAlerts(); });
     $$('[data-alert-to]', box).forEach(c => c.addEventListener('change', () => {
       const e = c.dataset.alertTo;
-      ev._alertEmails = ev._alertEmails.filter(x => x !== e);
-      if (c.checked) ev._alertEmails.push(e);
-      markDirty();
+      ev._updateTo = (ev._updateTo || []).filter(x => x !== e);
+      if (c.checked) ev._updateTo.push(e);
+      markDirty(); renderAlerts();
     }));
     if (organisers === null) call(A + '/organisers').then(r => { organisers = r.organisers; renderAlerts(); }, () => { organisers = []; renderAlerts(); });
   }
@@ -590,11 +601,11 @@
     const btn = $('#save');
     $('#save-err').innerHTML = '';
     btn.disabled = true; btn.textContent = 'Saving…';
-    const { _sched, _alertEmails, ...rest } = current;
+    const { _sched, _updateTo, ...rest } = current;
     const sched = k => (!_sched || _sched[k].auto) ? null : _sched[k].dates.filter(Boolean);
     const { rows, team_ids, slots: _concrete, ...rest2 } = rest;
     const body = { ...rest2, team_ids: team_ids || [], slots: rows.map(({ signups, start_utc, event_id, sort_order, ...s }) => s),
-      gap_alerts: sched('gap'), roster_alerts: sched('roster'), gap_alert_emails: _alertEmails || [] };
+      gap_alerts: sched('gap'), roster_alerts: sched('roster'), gap_alert_emails: [], update_to: _updateTo || [] };
     try {
       const { event } = current.id
         ? await call(A + '/events/' + current.id, { method: 'PUT', body })
@@ -1039,8 +1050,10 @@ Thank you!</textarea>
       ${groupNav('organisers')}
       <div class="toolbar"><h1 style="margin:0">Organisers</h1><span class="spacer"></span><button class="btn" id="invite">+ Add organiser</button></div>
       <p class="muted">Organisers can create events, see volunteers' contact details and change settings. They log in with an emailed link. Tap a name to correct it.</p>
-      <table class="list"><thead><tr><th>Name</th><th>Email</th><th class="hide-sm">Last login</th><th></th></tr></thead><tbody>
-        ${list.map(o => `<tr><td><input type="text" class="inline-edit" data-name="${o.id}" value="${esc(o.name || '')}" placeholder="Add a name" maxlength="80" aria-label="Name for ${esc(o.email)}">${o.id === me.user.id ? ' <span class="badge">You</span>' : ''}</td><td>${esc(o.email)}</td>
+      <p class="muted small">Tick <strong>Updates</strong> for the people who should get unfilled spot and "who's doing what" emails on new events. You can still change who gets them on each event.</p>
+      <table class="list"><thead><tr><th>Name</th><th class="hide-sm">Email</th><th title="Ticked to get updates on new events">Updates</th><th class="hide-sm">Last login</th><th></th></tr></thead><tbody>
+        ${list.map(o => `<tr><td><input type="text" class="inline-edit" data-name="${o.id}" value="${esc(o.name || '')}" placeholder="Add a name" maxlength="80" aria-label="Name for ${esc(o.email)}">${o.id === me.user.id ? ' <span class="badge">You</span>' : ''}<div class="show-sm small muted">${esc(o.email)}</div></td><td class="hide-sm">${esc(o.email)}</td>
+          <td><label class="check small" style="margin:0"><input type="checkbox" data-upd="${o.id}" ${o.gets_updates ? 'checked' : ''} aria-label="${esc(o.email)} gets updates on new events"> <span class="hide-sm">New events</span></label></td>
           <td class="hide-sm">${o.last_login ? esc(new Date(o.last_login.replace(' ', 'T') + 'Z').toLocaleDateString('en-AU')) : '<span class="muted">Not yet</span>'}</td>
           <td class="actions">${list.length > 1 ? `<button class="btn danger small" data-rm="${o.id}">Remove</button>` : ''}</td></tr>`).join('')}
       </tbody></table>`;
@@ -1059,6 +1072,13 @@ Thank you!</textarea>
       };
       inp.addEventListener('blur', save);
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } if (e.key === 'Escape') { inp.value = saved; inp.blur(); } });
+    });
+    $$('[data-upd]').forEach(c => c.onchange = async () => {
+      try {
+        await call(`${A}/organisers/${c.dataset.upd}`, { method: 'PUT', body: { gets_updates: c.checked } });
+        toast(c.checked ? 'They\'ll be ticked for updates on new events.' : 'They won\'t be ticked for updates on new events.');
+        organisers = null;
+      } catch (err) { toast(err.message, 'bad'); c.checked = !c.checked; }
     });
     $('#invite').onclick = () => modal(`
       <h2>Add an organiser</h2>
