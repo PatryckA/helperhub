@@ -905,16 +905,16 @@
     const KINDS = {
       new: { label: 'New event', hint: 'First outreach when the event goes live', style: 'jobs',
         subject: `${ev.title}: volunteers needed`,
-        text: `Hi everyone,\n\n${ev.title} is on ${when}${where}. Each ${lc} needs a few helpers to make sure the day runs smoothly.\n\nPlease share your ${lc}'s sign-up link with your parents as soon as you can.\n\nThank you!` },
+        text: `Hi everyone,\n\n${ev.title} is on ${when}${where}. Each ${lc} needs a few helpers to make sure the day runs smoothly.\n\nPlease share your ${lc}'s sign-up link with your ${kindInfo(group).people} as soon as you can.\n\nYour ${role} page has ready-made messages you can post to your ${lc}'s WhatsApp group in one tap, and shows who's signed up as it happens.\n\nThank you!` },
       progress: { label: 'Progress update', hint: "What's filled and what's still needed", style: 'gaps',
         subject: `${ev.title}: volunteer update`,
-        text: `Hi everyone,\n\nHere's where we're at with volunteers for ${ev.title}. Please follow up with your parents to fill any remaining spots.\n\nThank you!` },
+        text: `Hi everyone,\n\nHere's where we're at with volunteers for ${ev.title}. Please follow up with your ${kindInfo(group).people} to fill any remaining spots. Your ${role} page has a ready-made "Fill the gaps" message you can post in one tap.\n\nThank you!` },
       final: { label: 'Final reminder', hint: "A day or two before: who's helping, any gaps", style: 'roster',
         subject: `${ev.title}: final reminder`,
-        text: `Hi everyone,\n\n${ev.title} is ${soon}. Here's who's helping from your ${lc}. Please check they're still good to go, and let me know about any gaps as soon as possible.\n\nThanks so much!` },
+        text: `Hi everyone,\n\n${ev.title} is ${soon}. Here's who's helping from your ${lc}. Please check they're still good to go, and let me know about any gaps as soon as possible. Your ${role} page has a ready-made "Who's doing what" message to thank and remind your helpers.\n\nThanks so much!` },
       thanks: { label: 'Thank you', hint: 'After the event', style: 'none',
         subject: `Thank you: ${ev.title}`,
-        text: `Hi everyone,\n\nThank you for organising your ${lc}'s helpers for ${ev.title}. It made a big difference on the day. Please pass on our thanks to the parents who helped out.\n\nSee you next time!` },
+        text: `Hi everyone,\n\nThank you for organising your ${lc}'s helpers for ${ev.title}. It made a big difference on the day. Please pass on our thanks to the ${kindInfo(group).people} who helped out.\n\nSee you next time!` },
     };
     const filled = ev.slots.reduce((n, s) => n + s.signups.length, 0);
     let kind = dates.length && dates[dates.length - 1] < today ? 'thanks' : !filled ? 'new' : daysAway <= 2 ? 'final' : 'progress';
