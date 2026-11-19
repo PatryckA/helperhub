@@ -272,3 +272,18 @@ table.list td.actions { white-space: nowrap; text-align: right; }
 .team-slots .still { color: #b45309; }
 .team-slots .done { color: var(--ok); }
 .share-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+/* Collapsible sections (event editor) */
+.fold { margin-top: 18px; }
+.fold-head { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: none; padding: 8px 2px; font: inherit; cursor: pointer; text-align: left; color: inherit; }
+.fold-title { font-size: 20px; font-weight: 700; white-space: nowrap; }
+.fold-sum { flex: 1; min-width: 0; color: var(--muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fold-chev { width: 10px; height: 10px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; flex: none; margin-right: 6px; }
+.fold.open .fold-chev { transform: rotate(45deg); }
+.fold-body { display: none; padding-top: 6px; }
+.fold.open .fold-body { display: block; }
+.fold.open .fold-sum { visibility: hidden; }
+.fold-card > h2:first-child { cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0; }
+.fold-card > h2:first-child::after { content: ''; width: 10px; height: 10px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; margin-right: 6px; }
+.fold-card.open > h2:first-child::after { transform: rotate(45deg); }
+.fold-card.open > h2:first-child { margin-bottom: 8px; }
+.fold-card:not(.open) > :not(h2:first-child) { display: none; }

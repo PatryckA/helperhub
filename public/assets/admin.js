@@ -196,10 +196,61 @@
     if (tab === 'volunteers' && saved) renderVolunteers(); else renderSetup();
   }
 
+  /* Cards with a heading become collapsible: tap the heading to open or close. openIndex = the one that starts open. */
+  function foldCards(root, openIndex) {
+    $$(':scope > .card', root).forEach((card, i) => {
+      const h = card.querySelector(':scope > h2:first-child');
+      if (!h) return;
+      card.classList.add('fold-card');
+      if (i === openIndex) card.classList.add('open');
+      h.setAttribute('role', 'button'); h.tabIndex = 0;
+      const toggle = () => card.classList.toggle('open');
+      h.onclick = toggle;
+      h.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
+    });
+  }
+
+  /* Collapsible sections in the event editor. Open/closed is remembered while the event is open. */
+  function foldHead(key, title) {
+    const open = current._fold[key];
+    return `<section class="fold${open ? ' open' : ''}" data-fold="${key}">
+      <button type="button" class="fold-head" aria-expanded="${open}"><span class="fold-title">${title}</span><span class="fold-sum" id="sum-${key}"></span><span class="fold-chev" aria-hidden="true"></span></button>
+      <div class="fold-body">`;
+  }
+  function bindFolds() {
+    $$('section.fold > .fold-head').forEach(h => h.onclick = () => {
+      const sec = h.parentElement, open = !sec.classList.contains('open');
+      sec.classList.toggle('open', open); h.setAttribute('aria-expanded', open);
+      current._fold[sec.dataset.fold] = open;
+    });
+  }
+  // a short summary shown beside each heading, so a closed section still says what's in it
+  function foldSummaries() {
+    const ev = current, set = (k, t) => { const el = $('#sum-' + k); if (el) el.textContent = t; };
+    if (!ev || !ev.rows) return;
+    const n = ev.rows.filter(r => r.kind !== 'item').length, m = ev.rows.filter(r => r.kind === 'item').length;
+    set('details', ev.title || '');
+    set('slots', n ? `${n} slot${n === 1 ? '' : 's'}` : 'None');
+    set('items', m ? `${m} item${m === 1 ? '' : 's'}` : 'None');
+    const tk = (teams || []).filter(t => (ev.team_ids || []).includes(t.id));
+    set('taking', tk.length ? tk.map(t => t.name).join(', ') : 'None ticked');
+    if (ev._sched) {
+      const d = k => schedDates(k).filter(Boolean).map(x => niceDate(x)).join(', ');
+      const people = (ev._updateTo || []).length;
+      set('updates', [d('gap') ? `Gaps: ${d('gap')}` : '', d('roster') ? `Roster: ${d('roster')}` : '', people ? `${people} ${people === 1 ? 'person' : 'people'}` : ''].filter(Boolean).join(' · ') || 'Off');
+    }
+  }
+
   function renderSetup() {
     const ev = current;
     if (!ev.rows) { ev.rows = collapseSlots(ev.slots); ev.team_ids = ev.team_ids || []; }
+    if (!ev._fold) {
+      // which sections start open: the ones with something in them (time slots open on a new event)
+      const shifts = ev.rows.some(r => r.kind !== 'item'), items = ev.rows.some(r => r.kind === 'item');
+      ev._fold = { details: true, taking: !!(teams && teams.length), updates: false, slots: shifts || !items, items };
+    }
     $('#tab-body').innerHTML = `
+      ${foldHead('details', 'Event details')}
       <form id="evform" class="card">
         <label for="f-title">Event name</label>
         <input id="f-title" data-k="title" type="text" value="${esc(ev.title)}" placeholder="e.g. Spring Fete" required>
@@ -217,18 +268,18 @@
         <input id="f-du" data-k="donation_url" type="url" value="${esc(ev.donation_url || '')}" placeholder="https://...">
         <label for="f-dx">Donation message <span class="opt">(optional)</span></label>
         <input id="f-dx" data-k="donation_text" type="text" value="${esc(ev.donation_text || '')}" placeholder="Can't bring something? You're welcome to donate instead.">
-      </form>
-      <div class="card hidden" id="taking" style="margin-top:14px"></div>
-      <div class="card" id="alerts" style="margin-top:14px"></div>
-      <div class="toolbar" style="margin-top:22px">
-        <h2 style="margin:0">Time slots</h2><span class="spacer"></span>
+      </form></div></section>
+      ${teams && teams.length ? `${foldHead('taking', `${esc(T().many)} taking part`)}<div class="card" id="taking"></div></div></section>` : '<div id="taking" class="hidden"></div>'}
+      ${foldHead('updates', 'Organiser updates')}<div class="card" id="alerts"></div></div></section>
+      ${foldHead('slots', 'Time slots')}
+      <div class="toolbar" style="margin:0 0 6px">
+        <p class="small muted" style="margin:0">Each slot is one task at one time. Volunteers take the whole slot.</p><span class="spacer"></span>
         <button class="btn secondary small" id="addrun">+ Add a run of shifts</button>
         <button class="btn secondary small" id="addslot">+ Add slot</button>
       </div>
-      <p class="small muted">Each slot is one task at one time. Volunteers take the whole slot.</p>
-      <div id="slots" class="stack"></div>
-      <div class="toolbar" style="margin-top:26px">
-        <h2 style="margin:0">Things to bring</h2><span class="spacer"></span>
+      <div id="slots" class="stack"></div></div></section>
+      ${foldHead('items', 'Things to bring')}
+      <div class="toolbar" style="margin:0 0 6px"><span class="spacer"></span>
         <button class="btn secondary small" id="additem">+ Add item</button>
       </div>
       <p class="small muted">Anything people can bring, e.g. "Main dish" for 6 people or "Raffle prizes". Volunteers can add details. Tick "This is food" to also ask for dietary info.</p>
@@ -240,7 +291,7 @@
         <label for="f-dn">Where <span class="opt">(optional)</span></label>
         <input id="f-dn" data-k="dropoff_note" type="text" value="${esc(ev.dropoff_note || '')}" placeholder="e.g. Main hall, side entrance">
       </div>
-      <div id="items" class="stack"></div>
+      <div id="items" class="stack"></div></div></section>
       <div id="save-err"></div>
       <div class="actionbar show"><div class="inner">
         <span class="small muted" id="dirty-note">${ev.id ? 'All changes saved' : 'Not saved yet'}</span>
@@ -261,9 +312,11 @@
     }
     $('#f-ce').addEventListener('change', () => renderAlerts());
     $('#f-dd').addEventListener('input', () => renderAlerts());
+    bindFolds();
     renderTaking();
     renderSlots();
     renderAlerts();
+    $('#f-title').addEventListener('input', foldSummaries);
   }
 
   /* ---------------- Organiser updates: unfilled spots + who's doing what ---------------- */
@@ -292,6 +345,7 @@
     const contact = (ev.contact_email || group.contact_email || '').toLowerCase();
     if (ev._updateTo === null && organisers !== null) ev._updateTo = organisers.filter(o => o.gets_updates).map(o => o.email.toLowerCase());
     const chosen = new Set(ev._updateTo || []);
+    foldSummaries();
     // everyone who could get updates: the organisers, plus the event contact if they aren't one
     const people = (organisers || []).map(o => ({ email: o.email.toLowerCase(), label: o.name ? `${o.name} (${o.email})` : o.email, isContact: o.email.toLowerCase() === contact }));
     if (contact && !people.some(p => p.email === contact)) people.unshift({ email: contact, label: contact, isContact: true, outside: true });
@@ -314,7 +368,6 @@
       ${dates.length < 3 ? `<button class="btn secondary small" data-sched-add="${kind}" style="margin-top:8px">+ Add a date</button>` : ''}`;
     };
     box.innerHTML = `
-      <h2 style="margin:0 0 4px">Organiser updates</h2>
       <p class="small muted" style="margin:0">Emailed to the people you tick here. Use Share on WhatsApp at the top of the event to share any time.</p>
       <div style="margin-top:12px;padding-bottom:12px;border-bottom:1px solid var(--line)">
         <div class="small" style="font-weight:600">Who gets these updates</div>
@@ -453,6 +506,7 @@
   function markDirty() { dirty = true; const n = $('#dirty-note'); if (n) n.textContent = 'Unsaved changes'; }
 
   function renderSlots() {
+    foldSummaries();
     const entries = current.rows.map((s, i) => ({ s, i }));
     const shifts = entries.filter(e => e.s.kind !== 'item');
     const items = entries.filter(e => e.s.kind === 'item');
@@ -556,13 +610,13 @@
     return rows;
   }
   function renderTaking() {
+    foldSummaries();
     const box = $('#taking');
     if (!box) return;
     if (!teams || !teams.length) { box.classList.add('hidden'); return; }
     const L = T(), chosen = new Set(current.team_ids || []);
     box.classList.remove('hidden');
     box.innerHTML = `
-      <h2 style="margin:0 0 4px">${esc(L.many)} taking part</h2>
       <p class="small muted" style="margin:0 0 10px">Tick the ${esc(L.many.toLowerCase())} at this event. Jobs set to "Each ${esc(L.one.toLowerCase())} taking part" are created for every ticked one.</p>
       <div class="chip-checks">${teams.map(t => `<label class="chip-check"><input type="checkbox" value="${t.id}" ${chosen.has(t.id) ? 'checked' : ''}> ${esc(t.name)}</label>`).join('')}</div>
       <p class="small" style="margin:10px 0 0"><a href="#" id="taking-all">Tick all</a> · <a href="#" id="taking-none">Clear</a></p>`;
@@ -999,6 +1053,7 @@ Thank you!</textarea>
       </form>
       <div class="actionbar show"><div class="inner"><span class="small muted" id="dirty-note">All changes saved</span><button class="btn" id="s-save">Save settings</button></div></div>`;
     bindNav();
+    foldCards($('#sform'), 0);
     const preview = () => {
       $('#s-preview').style.background = g.accent;
       const light = getComputedStyle(document.documentElement).getPropertyValue('--on-accent');
