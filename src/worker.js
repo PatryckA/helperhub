@@ -155,6 +155,7 @@ async function api(request, env, ctx, url) {
     if (m === 'GET' && rest === '/organisers') return listOrganisers(env, group);
     if (m === 'POST' && rest === '/organisers') return inviteOrganiser(request, env, ctx, group, user);
     if (m === 'DELETE' && (e = rest.match(/^\/organisers\/(\d+)$/))) return removeOrganiser(env, group, +e[1]);
+    if (m === 'PUT' && (e = rest.match(/^\/organisers\/(\d+)$/))) return renameOrganiser(request, env, group, +e[1]);
     if (m === 'GET' && rest === '/teams') return listTeams(env, group);
     if (m === 'PUT' && rest === '/teams') return saveTeams(request, env, group);
     if (m === 'GET' && rest === '/events') return adminListEvents(env, group);
@@ -627,6 +628,16 @@ async function listOrganisers(env, group) {
     `SELECT u.id, u.email, u.name, u.last_login, m.created_at FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.group_id = ? ORDER BY m.created_at`
   ).bind(group.id).all();
   return json({ organisers: results });
+}
+
+// Fix an organiser's name (any organiser of the group can do this)
+async function renameOrganiser(request, env, group, userId) {
+  const b = await readJson(request);
+  const name = opt(b.name, 80);
+  const member = await env.DB.prepare(`SELECT 1 FROM memberships WHERE group_id = ? AND user_id = ?`).bind(group.id, userId).first();
+  if (!member) throw httpError(404, 'Organiser not found.');
+  await env.DB.prepare(`UPDATE users SET name = ? WHERE id = ?`).bind(name, userId).run();
+  return json({ ok: true, name });
 }
 
 async function inviteOrganiser(request, env, ctx, group, inviter) {

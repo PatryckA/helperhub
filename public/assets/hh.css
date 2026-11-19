@@ -255,3 +255,10 @@ table.list td.actions { white-space: nowrap; text-align: right; }
 .chip-check:has(input:checked) { border-color: var(--accent); background: #f5faf9; }
 .chip-add { width: auto; padding: 6px 10px; border-radius: 999px; font-size: 14px; }
 .cm-ev { border-top: 1px solid var(--line); padding: 8px 0; }
+/* Click-to-edit text (organiser names) */
+.list input[type=text].inline-edit { border: 1px solid transparent; background: transparent; box-shadow: none; padding: 4px 6px; margin: -4px -6px; border-radius: 6px; font: inherit; width: 100%; min-width: 7ch; height: auto; }
+.list input[type=text].inline-edit:hover { border-color: var(--line); }
+.list input[type=text].inline-edit:focus { border-color: var(--accent); background: #fff; outline: none; }
+.list input[type=text].inline-edit::placeholder { color: var(--muted); font-style: italic; }
+.list td:first-child { min-width: 7em; }
+.list td { overflow-wrap: anywhere; }

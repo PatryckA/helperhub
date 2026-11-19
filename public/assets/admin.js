@@ -1038,13 +1038,28 @@ Thank you!</textarea>
     app.innerHTML = `
       ${groupNav('organisers')}
       <div class="toolbar"><h1 style="margin:0">Organisers</h1><span class="spacer"></span><button class="btn" id="invite">+ Add organiser</button></div>
-      <p class="muted">Organisers can create events, see volunteers' contact details and change settings. They log in with an emailed link.</p>
+      <p class="muted">Organisers can create events, see volunteers' contact details and change settings. They log in with an emailed link. Tap a name to correct it.</p>
       <table class="list"><thead><tr><th>Name</th><th>Email</th><th class="hide-sm">Last login</th><th></th></tr></thead><tbody>
-        ${list.map(o => `<tr><td>${esc(o.name || '')}${o.id === me.user.id ? ' <span class="badge">You</span>' : ''}</td><td>${esc(o.email)}</td>
+        ${list.map(o => `<tr><td><input type="text" class="inline-edit" data-name="${o.id}" value="${esc(o.name || '')}" placeholder="Add a name" maxlength="80" aria-label="Name for ${esc(o.email)}">${o.id === me.user.id ? ' <span class="badge">You</span>' : ''}</td><td>${esc(o.email)}</td>
           <td class="hide-sm">${o.last_login ? esc(new Date(o.last_login.replace(' ', 'T') + 'Z').toLocaleDateString('en-AU')) : '<span class="muted">Not yet</span>'}</td>
           <td class="actions">${list.length > 1 ? `<button class="btn danger small" data-rm="${o.id}">Remove</button>` : ''}</td></tr>`).join('')}
       </tbody></table>`;
     bindNav();
+    $$('[data-name]').forEach(inp => {
+      let saved = inp.value;
+      const save = async () => {
+        const v = inp.value.trim();
+        if (v === saved) return;
+        try {
+          await call(`${A}/organisers/${inp.dataset.name}`, { method: 'PUT', body: { name: v } });
+          saved = inp.value = v; toast('Name saved.');
+          if (+inp.dataset.name === me.user.id) me.user.name = v;
+          organisers = null; // refresh the alert recipient list next time
+        } catch (err) { toast(err.message, 'bad'); inp.value = saved; }
+      };
+      inp.addEventListener('blur', save);
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } if (e.key === 'Escape') { inp.value = saved; inp.blur(); } });
+    });
     $('#invite').onclick = () => modal(`
       <h2>Add an organiser</h2>
       <label>Their name</label><input type="text" id="i-name">
