@@ -287,3 +287,5 @@ table.list td.actions { white-space: nowrap; text-align: right; }
 .fold-card.open > h2:first-child::after { transform: rotate(45deg); }
 .fold-card.open > h2:first-child { margin-bottom: 8px; }
 .fold-card:not(.open) > :not(h2:first-child) { display: none; }
+.badge.archived { background: #eef0f3; color: #5b6573; }
+.archived-list > summary { cursor: pointer; list-style: revert; }

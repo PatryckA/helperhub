@@ -90,7 +90,7 @@ async function withShareTags(res, env, slug, eventId) {
     let title = `${g.name} | Volunteer sign-up`;
     let desc = g.welcome_text || `Volunteer with ${g.name}. Pick a time slot and sign up in under a minute.`;
     if (eventId) {
-      const ev = await env.DB.prepare(`SELECT title, description FROM events WHERE id = ? AND group_id = ? AND published = 1`).bind(eventId, g.id).first();
+      const ev = await env.DB.prepare(`SELECT title, description FROM events WHERE id = ? AND group_id = ? AND published = 1 AND archived = 0`).bind(eventId, g.id).first();
       if (ev) { title = `${ev.title} | ${g.name}`; desc = ev.description || desc; }
     }
     desc = desc.replace(/\s+/g, ' ').slice(0, 200);
@@ -162,6 +162,8 @@ async function api(request, env, ctx, url) {
     if (m === 'PUT' && rest === '/teams') return saveTeams(request, env, group);
     if (m === 'GET' && rest === '/events') return adminListEvents(env, group);
     if (m === 'POST' && rest === '/events/duplicate-many') return adminDuplicateMany(request, env, group);
+    if (m === 'POST' && rest === '/events/archive-past') return adminArchivePast(env, group);
+    if (m === 'POST' && (e = rest.match(/^\/events\/(\d+)\/archive$/))) return adminArchive(request, env, group, +e[1]);
     if (m === 'POST' && rest === '/events') return adminSaveEvent(request, env, group, null);
     if ((e = rest.match(/^\/events\/(\d+)$/))) {
       if (m === 'GET') return adminGetEvent(env, group, +e[1]);
@@ -445,7 +447,7 @@ async function listPublicEvents(env, group) {
            MIN(s.date) AS first_date, MAX(s.date) AS last_date, SUM(s.capacity) AS capacity,
            (SELECT COUNT(*) FROM signups g JOIN slots s2 ON s2.id = g.slot_id WHERE s2.event_id = e.id AND s2.start_utc > ?1) AS filled
     FROM events e JOIN slots s ON s.event_id = e.id
-    WHERE e.group_id = ?2 AND e.published = 1 AND s.start_utc > ?1
+    WHERE e.group_id = ?2 AND e.published = 1 AND e.archived = 0 AND s.start_utc > ?1
     GROUP BY e.id ORDER BY first_date ASC, e.id ASC`).bind(now, group.id).all();
   return json({ group: publicGroup(env, group), events: results.map(r => ({ ...r, open: Math.max(0, r.capacity - r.filled) })) });
 }
@@ -454,7 +456,7 @@ async function getPublicEvent(env, group, id) {
   const ev = await env.DB.prepare(`
     SELECT id, title, description, location, contact_name, contact_email, dropoff_date, dropoff_time, dropoff_note,
            donation_url, donation_text
-    FROM events WHERE id = ? AND group_id = ? AND published = 1`).bind(id, group.id).first();
+    FROM events WHERE id = ? AND group_id = ? AND published = 1 AND archived = 0`).bind(id, group.id).first();
   if (!ev) throw httpError(404, 'This event could not be found. It may have been removed.');
   const { results: slots } = await env.DB.prepare(
     `SELECT s.id, s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.needs_wwcc, s.is_food, s.team_id, t.name AS team_name, t.sort_order AS team_order
@@ -507,9 +509,9 @@ async function createSignups(request, env, ctx, group) {
 
   for (const slotId of slotIds) {
     const slot = await env.DB.prepare(
-      `SELECT s.*, e.published FROM slots s JOIN events e ON e.id = s.event_id WHERE s.id = ? AND e.group_id = ?`
+      `SELECT s.*, e.published, e.archived FROM slots s JOIN events e ON e.id = s.event_id WHERE s.id = ? AND e.group_id = ?`
     ).bind(slotId, group.id).first();
-    if (!slot || !slot.published) { problems.push({ slot_id: slotId, reason: 'This slot no longer exists.' }); continue; }
+    if (!slot || !slot.published || slot.archived) { problems.push({ slot_id: slotId, reason: 'This slot no longer exists.' }); continue; }
     const isItem = slot.kind === 'item';
     const label = isItem ? `"${slot.title}"` : `${slot.title} (${fmtDate(slot.date)}, ${fmtTime(slot.start_time)})`;
     if (slot.start_utc <= now.toISOString()) { problems.push({ slot_id: slotId, reason: isItem ? `${label} is closed.` : `${label} has already started.` }); continue; }
@@ -683,7 +685,7 @@ async function removeOrganiser(env, group, userId) {
 
 async function adminListEvents(env, group) {
   const { results } = await env.DB.prepare(`
-    SELECT e.id, e.title, e.location, e.published,
+    SELECT e.id, e.title, e.location, e.published, e.archived,
       (SELECT MIN(date) FROM slots WHERE event_id = e.id) AS first_date,
       (SELECT MAX(date) FROM slots WHERE event_id = e.id) AS last_date,
       (SELECT COALESCE(SUM(capacity),0) FROM slots WHERE event_id = e.id) AS capacity,
@@ -833,6 +835,23 @@ async function adminSaveEvent(request, env, group, id) {
   for (const t of taking) stmts.push(env.DB.prepare(`INSERT INTO event_teams (event_id, team_id) VALUES (?, ?)`).bind(id, t.id));
   if (stmts.length) await env.DB.batch(stmts);
   return adminGetEvent(env, group, id);
+}
+
+// Archived events are hidden from volunteers and the main events list, and get no reminders or updates.
+// Nothing is deleted, and they can be restored.
+async function adminArchive(request, env, group, id) {
+  const b = await readJson(request);
+  await loadEvent(env, group, id);
+  await env.DB.prepare(`UPDATE events SET archived = ? WHERE id = ? AND group_id = ?`).bind(b.archived === false ? 0 : 1, id, group.id).run();
+  return json({ ok: true });
+}
+
+// Archive every event whose slots have all finished
+async function adminArchivePast(env, group) {
+  const today = new Date().toISOString().slice(0, 10);
+  const r = await env.DB.prepare(`UPDATE events SET archived = 1 WHERE group_id = ? AND archived = 0
+    AND EXISTS (SELECT 1 FROM slots WHERE event_id = events.id) AND (SELECT MAX(date) FROM slots WHERE event_id = events.id) < ?`).bind(group.id, today).run();
+  return json({ ok: true, archived: r.meta.changes || 0 });
 }
 
 async function adminDeleteEvent(env, group, id) {
@@ -1168,7 +1187,7 @@ async function queueReminders(env) {
     SELECT g.id, g.first_name, g.email, g.manage_token, g.item_desc, g.dietary, s.kind, CASE WHEN tm.name IS NOT NULL THEN tm.name || ': ' || s.title ELSE s.title END AS title, s.details, s.date, s.start_time, s.end_time, s.start_utc,
            e.id AS event_id, e.group_id, e.title AS event_title, e.location, e.contact_name, e.contact_email, e.dropoff_note, gr.reminder_hours
     FROM signups g JOIN slots s ON s.id = g.slot_id JOIN events e ON e.id = s.event_id JOIN groups gr ON gr.id = e.group_id LEFT JOIN teams tm ON tm.id = s.team_id
-    WHERE g.reminder_sent = 0 AND gr.status = 'active' AND s.start_utc > ?1 AND s.start_utc <= ?2
+    WHERE g.reminder_sent = 0 AND gr.status = 'active' AND e.archived = 0 AND s.start_utc > ?1 AND s.start_utc <= ?2
     ORDER BY s.date, s.start_time`).bind(now.toISOString(), new Date(now.getTime() + 72 * 3600e3).toISOString()).all();
   const due = results.filter(r => r.start_utc <= new Date(now.getTime() + r.reminder_hours * 3600e3).toISOString());
   if (!due.length) return 0;
@@ -1303,7 +1322,7 @@ async function getTeamPage(env, token) {
   const now = new Date().toISOString();
   const { results: events } = await env.DB.prepare(`
     SELECT e.* FROM events e JOIN event_teams et ON et.event_id = e.id
-    WHERE et.team_id = ? AND e.published = 1 AND EXISTS (SELECT 1 FROM slots WHERE event_id = e.id AND start_utc > ?)
+    WHERE et.team_id = ? AND e.published = 1 AND e.archived = 0 AND EXISTS (SELECT 1 FROM slots WHERE event_id = e.id AND start_utc > ?)
     ORDER BY (SELECT MIN(date) FROM slots WHERE event_id = e.id), e.id`).bind(team.id, now).all();
   const out = [];
   const me = { id: team.id, name: team.name };
@@ -1381,7 +1400,7 @@ async function queueGapAlerts(env) {
   const { results } = await env.DB.prepare(`
     SELECT e.*, (SELECT MIN(date) FROM slots WHERE event_id = e.id) AS first_date
     FROM events e JOIN groups gr ON gr.id = e.group_id
-    WHERE gr.status = 'active' AND e.published = 1
+    WHERE gr.status = 'active' AND e.published = 1 AND e.archived = 0
       AND EXISTS (SELECT 1 FROM slots WHERE event_id = e.id AND start_utc > ?)
     ORDER BY first_date, e.id`).bind(now).all();
   const outbox = new Map(); // `${group_id}|${email}` -> { group, email, role, teams:Set, replyTo, gap:[], roster:[] }

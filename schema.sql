@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS events (
   gap_alerts   TEXT,                               -- unfilled-spot alert dates, comma list; NULL = default (3 days before)
   gap_alert_emails TEXT NOT NULL DEFAULT '',       -- extra organisers who get the alerts, comma list
   gap_alerts_sent TEXT NOT NULL DEFAULT '',        -- alert dates already sent
+  archived     INTEGER NOT NULL DEFAULT 0,        -- 1 = archived: hidden from volunteers and the main list, no emails
   update_to    TEXT,                               -- who gets updates (comma list of emails); NULL = contact + gap_alert_emails (older events)
   roster_alerts TEXT,                              -- "who's doing what" email dates; NULL = default (1 day before)
   roster_alerts_sent TEXT NOT NULL DEFAULT '',

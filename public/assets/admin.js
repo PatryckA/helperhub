@@ -82,13 +82,14 @@
     try { [{ events }, status] = await Promise.all([call(A + '/events'), call(A + '/status')]); }
     catch (err) { app.innerHTML = `<div class="error">${esc(err.message)}</div>`; return; }
     const today = new Date().toISOString().slice(0, 10);
-    const upcoming = events.filter(e => !e.last_date || e.last_date >= today);
-    const past = events.filter(e => e.last_date && e.last_date < today);
+    const active = events.filter(e => !e.archived), archived = events.filter(e => e.archived);
+    const upcoming = active.filter(e => !e.last_date || e.last_date >= today);
+    const past = active.filter(e => e.last_date && e.last_date < today);
     const rows = list => list.map(e => `
       <tr class="click" data-id="${e.id}">
         <td><strong>${esc(e.title)}</strong>${e.location ? `<div class="small muted">${esc(e.location)}</div>` : ''}</td>
         <td class="hide-sm">${esc(fmtRange(e.first_date, e.last_date)) || '<span class="muted">No slots</span>'}</td>
-        <td>${e.published ? '<span class="badge">Live</span>' : '<span class="badge draft">Draft</span>'}</td>
+        <td>${e.archived ? '<span class="badge archived">Archived</span>' : e.published ? '<span class="badge">Live</span>' : '<span class="badge draft">Draft</span>'}</td>
         <td>${e.filled} / ${e.capacity}</td>
       </tr>`).join('');
     const table = (list, empty) => list.length ? `
@@ -107,9 +108,17 @@
       </div>
       ${emailWarningsHtml(status)}
       <h2>Upcoming and drafts</h2>${table(upcoming, 'No upcoming events yet. Create one, or duplicate a past event.')}
-      ${past.length ? `<h2>Past</h2>${table(past, '')}` : ''}
+      ${past.length ? `<div class="toolbar" style="margin-top:22px"><h2 style="margin:0">Past</h2><span class="spacer"></span>
+        <button class="btn secondary small" id="archive-past">Archive all past events</button></div>${table(past, '')}` : ''}
+      ${archived.length ? `<details class="archived-list" style="margin-top:22px"><summary><h2 style="display:inline;margin:0">Archived (${archived.length})</h2></summary>
+        <p class="small muted">Hidden from volunteers, with no reminders or updates. Open one to restore it.</p>${table(archived, '')}</details>` : ''}
       ${emailStatusHtml(status)}`;
     $('#new').onclick = () => go('new');
+    if ($('#archive-past')) $('#archive-past').onclick = async () => {
+      if (!window.confirm(`Archive ${past.length} past event${past.length === 1 ? '' : 's'}? They're kept and can be restored any time.`)) return;
+      try { const r = await call(A + '/events/archive-past', { method: 'POST' }); toast(`${r.archived} event${r.archived === 1 ? '' : 's'} archived.`); showList(); }
+      catch (err) { toast(err.message, 'bad'); }
+    };
     if ($('#copymany')) $('#copymany').onclick = () => copyEventModal();
     bindNav();
     $$('tr.click').forEach(tr => tr.onclick = () => go('event/' + tr.dataset.id));
@@ -150,8 +159,9 @@
       <p style="margin:0"><a href="#" id="back">&larr; All events</a></p>
       <div class="toolbar" style="margin-top:8px">
         <h1 style="margin:0">${saved ? esc(ev.title) : 'New event'}</h1>
-        ${saved ? (ev.published ? '<span class="badge">Live</span>' : '<span class="badge draft">Draft</span>') : ''}
+        ${saved ? (ev.archived ? '<span class="badge archived">Archived</span>' : ev.published ? '<span class="badge">Live</span>' : '<span class="badge draft">Draft</span>') : ''}
       </div>
+      ${ev.archived ? `<div class="notice" style="margin-top:10px">This event is archived: volunteers can't see it and no reminders or updates are sent. <button class="btn small secondary" id="unarchive" style="margin-left:6px">Restore</button></div>` : ''}
       ${saved ? `<div class="toolbar" style="margin-top:12px">
         <button class="btn small wa" id="share">Share on WhatsApp</button>
         ${(ev.team_ids || []).length ? `<button class="btn secondary small" id="managers">Message ${esc(T().role)}s</button>` : ''}
@@ -163,6 +173,7 @@
             <button role="menuitem" id="copylink">Copy volunteer link</button>
             <a role="menuitem" href="/${esc(slug)}/event/${ev.id}" target="_blank" rel="noopener">Preview volunteer page</a>
             <button role="menuitem" id="dup">Copy event</button>
+            <button role="menuitem" id="arch">${ev.archived ? 'Restore event' : 'Archive event'}</button>
             <button role="menuitem" id="del" class="bad">Delete event</button>
           </div>
         </div>
@@ -192,6 +203,15 @@
       $('#print').onclick = () => printSignIn(ev);
       $('#mail').onclick = () => emailModal(ev);
       $('#del').onclick = () => deleteModal(ev);
+      const setArchived = async on => {
+        try {
+          await call(`${A}/events/${ev.id}/archive`, { method: 'POST', body: { archived: on } });
+          toast(on ? 'Event archived.' : 'Event restored.');
+          if (on) go(''); else { const { event } = await call(`${A}/events/${ev.id}`); showEditor(event); }
+        } catch (err) { toast(err.message, 'bad'); }
+      };
+      $('#arch').onclick = () => setArchived(!ev.archived);
+      if ($('#unarchive')) $('#unarchive').onclick = () => setArchived(false);
     }
     if (tab === 'volunteers' && saved) renderVolunteers(); else renderSetup();
   }
