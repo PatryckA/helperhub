@@ -198,7 +198,19 @@
     if (saved) {
       const menu = $('#more-menu'), more = $('#more');
       const closeMenu = () => { menu.classList.add('hidden'); more.setAttribute('aria-expanded', 'false'); };
-      more.onclick = e => { e.stopPropagation(); const open = menu.classList.toggle('hidden'); more.setAttribute('aria-expanded', String(!open)); };
+      more.onclick = e => {
+        e.stopPropagation();
+        const hidden = menu.classList.toggle('hidden');
+        more.setAttribute('aria-expanded', String(!hidden));
+        if (!hidden) {
+          // keep the menu on screen: open to the right of the button if there isn't room on the left
+          menu.style.left = ''; menu.style.right = '';
+          const r = menu.getBoundingClientRect();
+          if (r.left < 8) { menu.style.left = '0'; menu.style.right = 'auto'; }
+          const r2 = menu.getBoundingClientRect();
+          if (r2.right > window.innerWidth - 8) { menu.style.left = 'auto'; menu.style.right = '0'; }
+        }
+      };
       $$('#more-menu [role=menuitem]').forEach(i => i.addEventListener('click', closeMenu));
       $('#share').onclick = () => shareModal(ev);
       if ($('#managers')) $('#managers').onclick = () => managersModal(ev);
