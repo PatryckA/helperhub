@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS teams (
   name          TEXT NOT NULL,
   manager_name  TEXT NOT NULL DEFAULT '',
   manager_email TEXT NOT NULL DEFAULT '',
-  sort_order    INTEGER NOT NULL DEFAULT 0
+  sort_order    INTEGER NOT NULL DEFAULT 0,
+  manager_token TEXT NOT NULL DEFAULT ''           -- private link for the team manager's page (/team?t=...)
 );
 CREATE INDEX IF NOT EXISTS idx_teams_group ON teams(group_id);
 

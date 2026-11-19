@@ -265,3 +265,10 @@ table.list td.actions { white-space: nowrap; text-align: right; }
 .show-sm { display: none; }
 @media (max-width: 640px) { .show-sm { display: block; margin-top: 2px; } }
 @media (max-width: 480px) { .tabs:not(.sub) button { padding-left: 9px; padding-right: 9px; font-size: 15px; } }
+/* Team manager page */
+.tally { margin: 12px 0 4px; }
+.team-slots { list-style: none; padding: 0; margin: 10px 0 0; }
+.team-slots li { padding: 8px 0; border-top: 1px solid var(--line); }
+.team-slots .still { color: #b45309; }
+.team-slots .done { color: var(--ok); }
+.share-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }

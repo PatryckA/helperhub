@@ -1128,7 +1128,7 @@ Thank you!</textarea>
           <button class="btn secondary small" id="t-bulk">+ Add several</button>
           <button class="btn small" id="t-add">+ Add ${esc(lc)}</button></div>
         <p class="muted">Optional, and only needed if your volunteers belong to smaller groups, such as teams, classes or stalls. Mark which slots belong to each one so parents see just theirs, and share a WhatsApp message with a single ${esc(lc)}.</p>
-        <p class="muted small">If you add a ${esc(L.role)}'s email, they'll get the unfilled spot and "who's doing what" emails for their ${esc(lc)}'s slots only. They don't need a login and can't see anyone's contact details. You can change what these are called in ${esc(kindInfo(group).settings)}.</p>
+        <p class="muted small">Each ${esc(lc)} has a private page for its ${esc(L.role)}: their upcoming events, who's signed up, and ready-made WhatsApp messages. Copy the link below each one. If you add a ${esc(L.role)}'s email, they'll also get the unfilled spot and "who's doing what" emails for their ${esc(lc)}'s slots, with the page link. They don't need a login and can't see anyone's contact details. You can change what these are called in ${esc(kindInfo(group).settings)}.</p>
         <div class="stack" id="t-list">${list.map((t, i) => `
           <div class="slot-edit" data-i="${i}">
             <div class="grid team-grid">
@@ -1136,7 +1136,9 @@ Thank you!</textarea>
               <div><label>${esc(role)} <span class="opt">(optional)</span></label><input type="text" data-k="manager_name" maxlength="100" value="${esc(t.manager_name || '')}" placeholder="Name"></div>
               <div><label>Their email <span class="opt">(optional)</span></label><input type="email" data-k="manager_email" maxlength="200" value="${esc(t.manager_email || '')}" placeholder="name@example.com"></div>
             </div>
-            <div class="foot"><span></span><span>
+            <div class="foot"><span>${t.id && t.manager_token ? `
+              <button class="btn link" data-mlink="${i}">Copy ${esc(L.role)}'s page link</button>
+              <button class="btn link muted" data-newlink="${i}">${t.new_link ? 'New link on save' : 'New link'}</button>` : '<span class="small muted">Save to get a page link</span>'}</span><span>
               <button class="btn link" data-up="${i}" ${i ? '' : 'disabled'}>Move up</button>
               <button class="btn link" data-rm="${i}" style="color:var(--bad)">Remove</button></span></div>
           </div>`).join('') || `<p class="muted">No ${esc(lcs)} yet.</p>`}</div>
@@ -1153,6 +1155,17 @@ Thank you!</textarea>
         list.splice(+b.dataset.rm, 1); markDirty(); render();
       });
       $$('[data-up]').forEach(b => b.onclick = () => { const i = +b.dataset.up; [list[i - 1], list[i]] = [list[i], list[i - 1]]; markDirty(); render(); });
+      $$('[data-mlink]').forEach(b => b.onclick = () => {
+        const url = `${location.origin}/team?t=${list[+b.dataset.mlink].manager_token}`;
+        if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast(`Copied. Send it to the ${L.role} only: it's their private page.`), () => prompt('Copy this link', url));
+        else prompt('Copy this link', url);
+      });
+      $$('[data-newlink]').forEach(b => b.onclick = () => {
+        const t = list[+b.dataset.newlink];
+        if (t.new_link) { t.new_link = false; render(); return; }
+        if (!window.confirm(`Make a new page link for ${t.name}? The old link stops working once you save.`)) return;
+        t.new_link = true; markDirty(); render();
+      });
       $('#t-add').onclick = () => { list.push({ name: '', manager_name: '', manager_email: '' }); markDirty(); render(); const ins = $$('#t-list input[data-k=name]'); ins[ins.length - 1].focus(); };
       $('#t-bulk').onclick = () => modal(`
         <h2>Add several ${esc(lcs)}</h2>

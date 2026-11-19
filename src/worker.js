@@ -19,7 +19,7 @@
  *   TURNSTILE_SECRET    secret for the bot check
  */
 
-const RESERVED = new Set(['api', 'assets', 'start', 'login', 'auth', 'manage', 'owner', 'privacy', 'terms', 'admin', 'help',
+const RESERVED = new Set(['api', 'assets', 'start', 'login', 'auth', 'manage', 'team', 'owner', 'privacy', 'terms', 'admin', 'help',
   'about', 'www', 'mail', 'email', 'support', 'helperhub', 'static', 'app', 'signup', 'sign-up', 'new', 'contact', 'blog',
   'index', 'home', 'dashboard', 'settings', 'account', 'favicon', 'robots', 'sitemap', 'status', 'docs', 'groups', 'events']);
 const TIMEZONES = ['Australia/Sydney', 'Australia/Melbourne', 'Australia/Brisbane', 'Australia/Adelaide', 'Australia/Darwin',
@@ -51,7 +51,7 @@ export default {
 /* ================================================================== */
 
 const PAGES = { '/': 'index.html', '/start': 'start.html', '/login': 'login.html', '/auth': 'auth.html',
-  '/manage': 'manage.html', '/owner': 'owner.html', '/privacy': 'privacy.html', '/terms': 'terms.html' };
+  '/manage': 'manage.html', '/team': 'team.html', '/owner': 'owner.html', '/privacy': 'privacy.html', '/terms': 'terms.html' };
 
 async function site(request, env, url) {
   const path = url.pathname.replace(/\/+$/, '') || '/';
@@ -141,6 +141,8 @@ async function api(request, env, ctx, url) {
   // Volunteer's private manage link
   if (m === 'GET' && (r = p.match(/^\/api\/manage\/([\w-]{20,})$/))) return getManage(env, r[1]);
   if (m === 'DELETE' && (r = p.match(/^\/api\/manage\/([\w-]{20,})\/(\d+)$/))) return cancelOwnSignup(env, r[1], +r[2]);
+  // Team manager's private page
+  if (m === 'GET' && (r = p.match(/^\/api\/team\/([\w-]{20,})$/))) return getTeamPage(env, r[1]);
 
   // Organiser admin
   if ((r = p.match(/^\/api\/admin\/([a-z0-9-]+)(\/.*)?$/))) {
@@ -912,9 +914,20 @@ async function duplicateOne(env, group, src, shift, title, teamIds) {
 /* ---------- teams ---------- */
 
 async function listTeams(env, group) {
-  const { results } = await env.DB.prepare(`SELECT id, name, manager_name, manager_email FROM teams WHERE group_id = ? ORDER BY sort_order, id`).bind(group.id).all();
+  const { results } = await env.DB.prepare(`SELECT id, name, manager_name, manager_email, manager_token FROM teams WHERE group_id = ? ORDER BY sort_order, id`).bind(group.id).all();
+  for (const t of results) if (!t.manager_token) t.manager_token = await teamToken(env, t);
   return json({ teams: results });
 }
+
+// Each team gets a private link for its manager's page, made the first time it's needed
+async function teamToken(env, team) {
+  if (team.manager_token) return team.manager_token;
+  const token = randomToken();
+  await env.DB.prepare(`UPDATE teams SET manager_token = ? WHERE id = ? AND manager_token = ''`).bind(token, team.id).run();
+  const row = await env.DB.prepare(`SELECT manager_token FROM teams WHERE id = ?`).bind(team.id).first();
+  return row.manager_token;
+}
+function teamPageLink(env, token) { return `${siteUrl(env)}/team?t=${token}`; }
 
 // Replace the group's team list. Removing a team leaves its slots without a team.
 async function saveTeams(request, env, group) {
@@ -925,7 +938,7 @@ async function saveTeams(request, env, group) {
   const teams = raw.map((t, i) => {
     const team = {
       id: t.id ? Number(t.id) : null, name: req(t.name, `Team ${i + 1} name`, 60),
-      manager_name: opt(t.manager_name, 100), manager_email: opt(t.manager_email, 200).toLowerCase(), sort_order: i,
+      manager_name: opt(t.manager_name, 100), manager_email: opt(t.manager_email, 200).toLowerCase(), sort_order: i, new_link: !!t.new_link,
     };
     if (team.manager_email && !isEmail(team.manager_email)) throw httpError(400, `The manager email for ${team.name} does not look right.`);
     return team;
@@ -941,8 +954,12 @@ async function saveTeams(request, env, group) {
     stmts.push(env.DB.prepare(`DELETE FROM teams WHERE id = ? AND group_id = ?`).bind(id, group.id));
   }
   for (const t of teams) {
-    if (t.id && keep.has(t.id)) stmts.push(env.DB.prepare(`UPDATE teams SET name=?, manager_name=?, manager_email=?, sort_order=? WHERE id=? AND group_id=?`)
-      .bind(t.name, t.manager_name, t.manager_email, t.sort_order, t.id, group.id));
+    if (t.id && keep.has(t.id)) {
+      stmts.push(env.DB.prepare(`UPDATE teams SET name=?, manager_name=?, manager_email=?, sort_order=? WHERE id=? AND group_id=?`)
+        .bind(t.name, t.manager_name, t.manager_email, t.sort_order, t.id, group.id));
+      // "New link": the old manager link stops working
+      if (t.new_link) stmts.push(env.DB.prepare(`UPDATE teams SET manager_token = ? WHERE id = ? AND group_id = ?`).bind(randomToken(), t.id, group.id));
+    }
     else stmts.push(env.DB.prepare(`INSERT INTO teams (group_id, name, manager_name, manager_email, sort_order) VALUES (?,?,?,?,?)`)
       .bind(group.id, t.name, t.manager_name, t.manager_email, t.sort_order));
   }
@@ -991,6 +1008,7 @@ async function adminMessageManagers(request, env, ctx, group, user, id) {
   // one email per manager, even if they manage more than one team here
   const byEmail = new Map();
   for (const t of teams) {
+    t.page = await teamToken(env, t);
     const key = t.manager_email.toLowerCase();
     if (!byEmail.has(key)) byEmail.set(key, { name: t.manager_name, teams: [] });
     byEmail.get(key).teams.push(t);
@@ -1008,6 +1026,7 @@ async function adminMessageManagers(request, env, ctx, group, user, id) {
         ${mine.length ? slotListHtml(mine, 'roster', team) : '<p style="color:#888">No jobs for this team yet.</p>'}
         ${mine.length ? button(wa, open.length ? `Ask ${t.name} parents on WhatsApp` : `Share ${t.name}'s helpers on WhatsApp`, '#1f8a4c') : ''}
         <p style="margin-top:-10px;font-size:14px">Sign-up link for your team: <a href="${eventLink(env, group, ev, t.id)}" style="color:${group.accent}">${eventLink(env, group, ev, t.id)}</a></p>
+        <p style="font-size:14px"><a href="${teamPageLink(env, t.page)}" style="color:${group.accent}">Your team page</a>: check your team and share updates any time.</p>
       </div>`;
     }).join('');
     await enqueue(env, {
@@ -1233,6 +1252,78 @@ function rosterShareText(env, group, ev, slots, team) {
   return parts.join('\n\n');
 }
 
+// The first "can you help?" message for a team's (or everyone's) open spots
+function askShareText(env, group, ev, slots, team) {
+  const open = slots.filter(s => s.left > 0);
+  if (!open.length) return null;
+  const shifts = slots.filter(s => s.kind !== 'item');
+  const dates = [...new Set(shifts.map(s => s.date))].sort();
+  let when = '';
+  if (dates.length === 1) {
+    const day = shifts.filter(s => s.date === dates[0]);
+    when = `${shortDate(dates[0])}, ${shortTime(day.map(s => s.start_time).sort()[0])} to ${shortTime(day.map(s => s.end_time).sort().pop())}`;
+  } else if (dates.length > 1) when = `${shortDate(dates[0])} to ${shortDate(dates[dates.length - 1])}`;
+  else if (ev.dropoff_date) when = `${shortDate(ev.dropoff_date)}, drop off by ${shortTime(ev.dropoff_time)}`;
+  const details = [when ? `When: ${when}` : '', ev.location ? `Where: ${ev.location}` : ''].filter(Boolean).join('\n');
+  const need = open.map(s => s.kind === 'item' ? `• ${slotLabel(s, team)} (to bring): ${s.left} needed`
+    : `• ${slotLabel(s, team)}, ${slotWhen(s)}: ${s.left} ${s.left === 1 ? 'person' : 'people'}`);
+  return `Hi everyone,\n\nWe need some people${team ? ` from ${team.name}` : ''} to help with a few things to make sure ${ev.title} runs smoothly.${details ? '\n\n' + details : ''}\n\nHere's what we need:\n${need.join('\n')}\n\nIt only takes a minute to sign up: ${eventLink(env, group, ev, team?.id)}\nThank you!`;
+}
+
+// A team manager's private page: their team's upcoming events, who's signed up, and ready-made messages
+async function getTeamPage(env, token) {
+  const team = await env.DB.prepare(`SELECT * FROM teams WHERE manager_token = ?`).bind(token).first();
+  if (!team) throw httpError(404, 'This link has changed or no longer works. Please ask your organiser for the new one.');
+  const group = await env.DB.prepare(`SELECT * FROM groups WHERE id = ?`).bind(team.group_id).first();
+  if (!group || group.status !== 'active') throw httpError(404, 'This group is not available.');
+  const now = new Date().toISOString();
+  const { results: events } = await env.DB.prepare(`
+    SELECT e.* FROM events e JOIN event_teams et ON et.event_id = e.id
+    WHERE et.team_id = ? AND e.published = 1 AND EXISTS (SELECT 1 FROM slots WHERE event_id = e.id AND start_utc > ?)
+    ORDER BY (SELECT MIN(date) FROM slots WHERE event_id = e.id), e.id`).bind(team.id, now).all();
+  const out = [];
+  const me = { id: team.id, name: team.name };
+  for (const ev of events.slice(0, 20)) {
+    const { results: slots } = await env.DB.prepare(`
+      SELECT s.*, t.name AS team_name FROM slots s LEFT JOIN teams t ON t.id = s.team_id
+      WHERE s.event_id = ? AND s.start_utc > ? ORDER BY s.date, s.start_time, s.sort_order, s.id`).bind(ev.id, now).all();
+    const { results: people } = await env.DB.prepare(`
+      SELECT g.slot_id, g.first_name, g.last_name, g.item_desc FROM signups g JOIN slots s ON s.id = g.slot_id WHERE s.event_id = ? ORDER BY g.id`).bind(ev.id).all();
+    for (const sl of slots) { sl.people = people.filter(p => p.slot_id === sl.id); sl.left = Math.max(0, sl.capacity - sl.people.length); }
+    const mine = slots.filter(sl => sl.team_id === team.id);
+    const show = sl => ({ kind: sl.kind, title: sl.title, date: sl.date, start_time: sl.start_time, end_time: sl.end_time, capacity: sl.capacity, left: sl.left,
+      names: sl.people.map(p => sl.kind === 'item' && p.item_desc ? `${shortName(p)} (${p.item_desc})` : shortName(p)) });
+    // the rest of the event, for context
+    const others = new Map();
+    for (const sl of slots.filter(sl => sl.team_id !== team.id)) {
+      const k = sl.team_id ? sl.team_name || 'Other' : '';
+      const o = others.get(k) || { name: k, filled: 0, capacity: 0 };
+      o.filled += sl.capacity - sl.left; o.capacity += sl.capacity;
+      others.set(k, o);
+    }
+    out.push({
+      id: ev.id, title: ev.title, location: ev.location,
+      first_date: slots[0]?.date || '', last_date: slots[slots.length - 1]?.date || '',
+      link: eventLink(env, group, ev, team.id),
+      mine: mine.map(show),
+      whole_event: slots.filter(sl => !sl.team_id).map(show),
+      others: [...others.values()].filter(o => o.name),
+      messages: {
+        ask: askShareText(env, group, ev, mine, me),
+        gaps: mine.some(sl => sl.left > 0) ? gapShareText(env, group, ev, mine.filter(sl => sl.left > 0), me) : null,
+        roster: mine.some(sl => sl.people.length) ? rosterShareText(env, group, ev, mine, me) : null,
+      },
+    });
+  }
+  return json({
+    group: publicGroup(env, group),
+    team: { name: team.name, manager_name: team.manager_name },
+    role: TEAM_LABELS[teamLabel(group)],
+    contact: { name: group.contact_name, email: group.contact_email },
+    events: out,
+  });
+}
+
 async function organiserRecipients(env, group, ev) {
   const recipients = new Set();
   const main = (ev.contact_email || group.contact_email || '').toLowerCase();
@@ -1296,7 +1387,7 @@ async function queueGapAlerts(env) {
     if (!dueKinds.length) continue;
 
     const { results: slots } = await env.DB.prepare(`
-      SELECT s.*, t.name AS team_name, t.manager_name, t.manager_email FROM slots s LEFT JOIN teams t ON t.id = s.team_id
+      SELECT s.*, t.name AS team_name, t.manager_name, t.manager_email, t.manager_token FROM slots s LEFT JOIN teams t ON t.id = s.team_id
       WHERE s.event_id = ? AND s.start_utc > ? ORDER BY s.date, s.start_time, s.sort_order, s.id`).bind(ev.id, now).all();
     const { results: people } = await env.DB.prepare(`
       SELECT g.slot_id, g.first_name, g.last_name, g.item_desc FROM signups g JOIN slots s ON s.id = g.slot_id WHERE s.event_id = ? ORDER BY g.id`).bind(ev.id).all();
@@ -1308,7 +1399,8 @@ async function queueGapAlerts(env) {
     // team managers: one audience per team that has a manager email
     const teams = new Map();
     for (const s of slots) if (s.team_id && s.manager_email) {
-      if (!teams.has(s.team_id)) teams.set(s.team_id, { id: s.team_id, name: s.team_name, email: s.manager_email.toLowerCase(), slots: [] });
+      if (!teams.has(s.team_id)) teams.set(s.team_id, { id: s.team_id, name: s.team_name, email: s.manager_email.toLowerCase(), slots: [],
+        page: teamPageLink(env, await teamToken(env, { id: s.team_id, manager_token: s.manager_token })) });
       teams.get(s.team_id).slots.push(s);
     }
 
@@ -1325,6 +1417,7 @@ async function queueGapAlerts(env) {
           html: slotListHtml(shown, kind, team),
           wa: `https://wa.me/?text=${encodeURIComponent(kind === 'gap' ? gapShareText(env, group, ev, open, team) : rosterShareText(env, group, ev, list, team))}`,
           admin: team ? null : adminLink,
+          page: team ? team.page : null,
         };
       };
       const whole = section(slots, null);
@@ -1356,6 +1449,7 @@ async function queueGapAlerts(env) {
           ${x.html}
           ${button(x.wa, 'Share on WhatsApp', '#1f8a4c')}
           ${x.admin ? `<p style="margin-top:-10px"><a href="${x.admin}" style="color:${box.group.accent}">See who's signed up</a></p>` : ''}
+          ${x.page ? `<p style="margin-top:-10px"><a href="${x.page}" style="color:${box.group.accent}">Your team page</a>: check your team and share updates any time</p>` : ''}
         </div>`).join('');
       const why = box.role === 'organiser'
         ? "You're getting this because you're an organiser of these events. Change the dates or who gets these updates in each event's settings."
