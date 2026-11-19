@@ -315,17 +315,17 @@
     };
     box.innerHTML = `
       <h2 style="margin:0 0 4px">Organiser updates</h2>
-      <p class="small muted" style="margin:0">Emailed to the people ticked below. Use Share on WhatsApp at the top of the event to share any time.</p>
-      ${block('gap')}
-      ${block('roster')}
-      <div style="margin-top:16px">
+      <p class="small muted" style="margin:0">Emailed to the people you tick here. Use Share on WhatsApp at the top of the event to share any time.</p>
+      <div style="margin-top:12px;padding-bottom:12px;border-bottom:1px solid var(--line)">
         <div class="small" style="font-weight:600">Who gets these updates</div>
         ${organisers === null ? '<p class="small muted" style="margin:4px 0 0">Loading organisers…</p>'
           : people.map(p => `<label class="check small" style="margin:6px 0 0"><input type="checkbox" data-alert-to="${esc(p.email)}" ${chosen.has(p.email) ? 'checked' : ''}> ${esc(p.label)}${p.isContact ? ' <span class="badge">Contact</span>' : ''}</label>`).join('')}
         ${organisers !== null && !chosen.size ? `<p class="small muted" style="margin:6px 0 0">Nobody ticked, so they'll go to ${fallback}.</p>` : ''}
         ${(teams || []).length ? `<p class="small muted" style="margin:6px 0 0">${esc(T().role.charAt(0).toUpperCase() + T().role.slice(1))}s also get updates for their own ${esc(T().one.toLowerCase())}'s slots.</p>` : ''}
-        <p class="small muted" style="margin:6px 0 0">Choose who's ticked for new events on the Organisers page.</p>
-      </div>`;
+        <p class="small muted" style="margin:6px 0 0">Choose who's ticked for new events on the ${esc(kindInfo(group).organisers)} tab.</p>
+      </div>
+      ${block('gap')}
+      ${block('roster')}`;
     const explicit = kind => { const st = ev._sched[kind]; if (st.auto) { st.dates = schedDates(kind).filter(Boolean); st.auto = false; } return st; };
     $$('[data-sched]', box).forEach(inp => inp.addEventListener('change', () => {
       explicit(inp.dataset.sched).dates[+inp.dataset.i] = inp.value; markDirty(); renderAlerts();
