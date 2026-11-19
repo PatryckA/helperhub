@@ -1,0 +1,2 @@
+-- Run once in the D1 console on databases created before teams could be linked to events.
+CREATE TABLE IF NOT EXISTS event_teams ( event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE, PRIMARY KEY (event_id, team_id) ); ALTER TABLE slots ADD COLUMN job_key TEXT NOT NULL DEFAULT ''; INSERT OR IGNORE INTO event_teams (event_id, team_id) SELECT DISTINCT event_id, team_id FROM slots WHERE team_id IS NOT NULL;

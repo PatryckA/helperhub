@@ -147,6 +147,7 @@
       </div>
       ${saved ? `<div class="toolbar" style="margin-top:12px">
         <button class="btn small wa" id="share">Share on WhatsApp</button>
+        ${(ev.team_ids || []).length ? `<button class="btn secondary small" id="managers">Message ${esc(T().role)}s</button>` : ''}
         <button class="btn secondary small" id="mail">Email volunteers</button>
         <button class="btn secondary small" id="print">Print sign-in sheet</button>
         <div class="menu-wrap">
@@ -178,6 +179,7 @@
       more.onclick = e => { e.stopPropagation(); const open = menu.classList.toggle('hidden'); more.setAttribute('aria-expanded', String(!open)); };
       $$('#more-menu [role=menuitem]').forEach(i => i.addEventListener('click', closeMenu));
       $('#share').onclick = () => shareModal(ev);
+      if ($('#managers')) $('#managers').onclick = () => managersModal(ev);
       $('#copylink').onclick = () => copyLink(ev.id);
       $('#dup').onclick = () => duplicateModal(ev);
       $('#print').onclick = () => printSignIn(ev);
@@ -189,6 +191,7 @@
 
   function renderSetup() {
     const ev = current;
+    if (!ev.rows) { ev.rows = collapseSlots(ev.slots); ev.team_ids = ev.team_ids || []; }
     $('#tab-body').innerHTML = `
       <form id="evform" class="card">
         <label for="f-title">Event name</label>
@@ -208,6 +211,7 @@
         <label for="f-dx">Donation message <span class="opt">(optional)</span></label>
         <input id="f-dx" data-k="donation_text" type="text" value="${esc(ev.donation_text || '')}" placeholder="Can't bring something? You're welcome to donate instead.">
       </form>
+      <div class="card hidden" id="taking" style="margin-top:14px"></div>
       <div class="card" id="alerts" style="margin-top:14px"></div>
       <div class="toolbar" style="margin-top:22px">
         <h2 style="margin:0">Time slots</h2><span class="spacer"></span>
@@ -247,6 +251,7 @@
       ev._alertEmails = ev.gap_alert_emails ? ev.gap_alert_emails.split(',') : [];
     }
     $('#f-dd').addEventListener('input', () => renderAlerts());
+    renderTaking();
     renderSlots();
     renderAlerts();
   }
@@ -257,7 +262,7 @@
     roster: { title: "Who's doing what", days: 1, what: "listing who signed up for each slot and item, with a button to share it" },
   };
   function firstDate() {
-    return current.slots.map(s => s.kind === 'item' ? current.dropoff_date : s.date).filter(Boolean).sort()[0] || '';
+    return current.rows.map(s => s.kind === 'item' ? current.dropoff_date : s.date).filter(Boolean).sort()[0] || '';
   }
   function minusDays(d, n) { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() - n); return x.toISOString().slice(0, 10); }
   function niceDate(d) { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace(',', ''); }
@@ -430,12 +435,12 @@
   function markDirty() { dirty = true; const n = $('#dirty-note'); if (n) n.textContent = 'Unsaved changes'; }
 
   function renderSlots() {
-    const entries = current.slots.map((s, i) => ({ s, i }));
+    const entries = current.rows.map((s, i) => ({ s, i }));
     const shifts = entries.filter(e => e.s.kind !== 'item');
     const items = entries.filter(e => e.s.kind === 'item');
     const foot = (s, n) => `
         <div class="foot">
-          <span class="muted">${n ? `${n} signed up` : ''}</span>
+          <span class="muted">${s.each_team ? `One for each of ${takingTeams().length} ${esc(T().many.toLowerCase())}${n ? ` · ${n} signed up` : ''}` : n ? `${n} signed up` : ''}</span>
           <span>
             <button class="btn link" data-act="copy">Copy</button>
             <button class="btn link" data-act="remove" ${n ? 'disabled title="Remove the volunteers first"' : ''} style="color:var(--bad)">Remove</button>
@@ -475,7 +480,7 @@
     $('#dropoff').classList.toggle('hidden', !items.length);
     renderAlerts();
     $$('.slot-edit').forEach(el => {
-      const s = current.slots[+el.dataset.i];
+      const s = current.rows[+el.dataset.i];
       $$('[data-k]', el).forEach(inp => inp.addEventListener('input', () => {
         s[inp.dataset.k] = inp.value; markDirty();
         if (inp.dataset.k === 'date') renderAlerts();
@@ -483,48 +488,98 @@
       const w = $('[data-wwcc]', el);
       if (w) w.addEventListener('change', () => { s.needs_wwcc = w.checked ? 1 : 0; markDirty(); });
       const ts = $('[data-team]', el);
-      if (ts) ts.addEventListener('change', () => { s.team_id = ts.value ? +ts.value : null; markDirty(); });
+      if (ts) ts.addEventListener('change', () => {
+        const was = { each: s.each_team, team: s.team_id, id: s.id, ids: s.team_slot_ids || {} };
+        Object.assign(s, teamChoice(ts.value));
+        // keep sign-ups attached where we can when switching between "each" and one team
+        if (s.each_team && !was.each) { s.team_slot_ids = was.team && was.id ? { [was.team]: was.id } : {}; s.id = undefined; }
+        else if (!s.each_team && was.each) { s.id = s.team_id ? was.ids[s.team_id] : undefined; s.team_slot_ids = {}; s.job_key = undefined; }
+        markDirty(); renderSlots();
+      });
       const f = $('[data-food]', el);
       if (f) f.addEventListener('change', () => { s.is_food = f.checked ? 1 : 0; markDirty(); });
       $('[data-act=copy]', el).onclick = () => {
-        current.slots.splice(+el.dataset.i + 1, 0, { ...s, id: undefined, signups: [] });
+        current.rows.splice(+el.dataset.i + 1, 0, { ...s, id: undefined, job_key: undefined, team_slot_ids: {}, signups: [] });
         markDirty(); renderSlots();
       };
-      $('[data-act=remove]', el).onclick = () => { current.slots.splice(+el.dataset.i, 1); markDirty(); renderSlots(); };
+      $('[data-act=remove]', el).onclick = () => { current.rows.splice(+el.dataset.i, 1); markDirty(); renderSlots(); };
     });
   }
 
+  const takingTeams = () => (teams || []).filter(t => (current.team_ids || []).includes(t.id));
+  function teamOptions(s) {
+    const taking = takingTeams(), lc = T().one.toLowerCase();
+    const orphan = s.team_id && !s.each_team && !taking.some(t => t.id === Number(s.team_id)) ? (teams || []).find(t => t.id === Number(s.team_id)) : null;
+    return `<option value="">Everyone (whole event)</option>
+      ${taking.length || s.each_team ? `<option value="each" ${s.each_team ? 'selected' : ''}>Each ${esc(lc)} taking part (${taking.length})</option>` : ''}
+      ${taking.map(t => `<option value="${t.id}" ${!s.each_team && Number(s.team_id) === t.id ? 'selected' : ''}>${esc(t.name)} only</option>`).join('')}
+      ${orphan ? `<option value="${orphan.id}" selected>${esc(orphan.name)} only (not ticked as taking part)</option>` : ''}`;
+  }
+  // what a team dropdown value means for a row
+  function teamChoice(v) {
+    if (v === 'each') return { each_team: true, team_id: null };
+    return { each_team: false, team_id: v ? +v : null };
+  }
   function teamSelect(s) {
     if (!teams || !teams.length) return '';
-    return `<div class="team-pick"><label class="small muted">${esc(T().one)}</label>
-      <select data-team><option value="">Everyone (whole event)</option>${teams.map(t => `<option value="${t.id}" ${Number(s.team_id) === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>`;
+    return `<div class="team-pick"><label class="small muted">${esc(T().one)}</label><select data-team>${teamOptions(s)}</select></div>`;
+  }
+  // rows for the editor: the copies of an "each team" job show as one row
+  function collapseSlots(slots) {
+    const rows = [], byKey = {};
+    for (const sl of slots || []) {
+      if (sl.job_key && sl.team_id) {
+        let r = byKey[sl.job_key];
+        if (!r) { r = byKey[sl.job_key] = { ...sl, id: undefined, team_id: null, each_team: true, team_slot_ids: {}, signups: [] }; rows.push(r); }
+        r.team_slot_ids[sl.team_id] = sl.id;
+        r.signups = r.signups.concat(sl.signups || []);
+      } else rows.push({ ...sl });
+    }
+    return rows;
+  }
+  function renderTaking() {
+    const box = $('#taking');
+    if (!box) return;
+    if (!teams || !teams.length) { box.classList.add('hidden'); return; }
+    const L = T(), chosen = new Set(current.team_ids || []);
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <h2 style="margin:0 0 4px">${esc(L.many)} taking part</h2>
+      <p class="small muted" style="margin:0 0 10px">Tick the ${esc(L.many.toLowerCase())} at this event. Jobs set to "Each ${esc(L.one.toLowerCase())} taking part" are created for every ticked one.</p>
+      <div class="chip-checks">${teams.map(t => `<label class="chip-check"><input type="checkbox" value="${t.id}" ${chosen.has(t.id) ? 'checked' : ''}> ${esc(t.name)}</label>`).join('')}</div>
+      <p class="small" style="margin:10px 0 0"><a href="#" id="taking-all">Tick all</a> · <a href="#" id="taking-none">Clear</a></p>`;
+    const update = () => { current.team_ids = $$('#taking input:checked').map(c => +c.value); markDirty(); renderSlots(); };
+    $$('#taking input').forEach(c => c.onchange = update);
+    $('#taking-all').onclick = e => { e.preventDefault(); $$('#taking input').forEach(c => { c.checked = true; }); update(); };
+    $('#taking-none').onclick = e => { e.preventDefault(); $$('#taking input').forEach(c => { c.checked = false; }); update(); };
   }
 
   function dropBlankStarter() {
     // a brand-new event starts with one empty time slot; drop it if unused
-    const only = current.slots.length === 1 && current.slots[0];
-    if (only && only.kind !== 'item' && !only.id && !only.title && !only.date) current.slots = [];
+    const only = current.rows.length === 1 && current.rows[0];
+    if (only && only.kind !== 'item' && !only.id && !only.title && !only.date) current.rows = [];
   }
 
   function addItem() {
     dropBlankStarter();
-    current.slots.push({ kind: 'item', title: '', details: '', capacity: 4, is_food: 0, signups: [] });
+    current.rows.push({ kind: 'item', title: '', details: '', capacity: 4, is_food: 0, signups: [] });
     markDirty(); renderSlots();
     const els = $$('#items .slot-edit'); const last = els[els.length - 1];
     last.scrollIntoView({ behavior: 'smooth', block: 'center' }); $('input', last).focus();
   }
 
   function addSlot() {
-    const shiftsOnly = current.slots.filter(s => s.kind !== 'item');
+    const shiftsOnly = current.rows.filter(s => s.kind !== 'item');
     const last = shiftsOnly[shiftsOnly.length - 1];
     let next = { title: '', details: '', date: '', start_time: '09:00', end_time: '10:00', capacity: 2, signups: [] };
     if (last) {
       // continue straight after the previous slot, same length
       const mins = toMin(last.end_time) - toMin(last.start_time);
-      next = { ...next, title: last.title, details: last.details, date: last.date, capacity: last.capacity, needs_wwcc: last.needs_wwcc ? 1 : 0, team_id: last.team_id ?? null,
+      next = { ...next, title: last.title, details: last.details, date: last.date, capacity: last.capacity, needs_wwcc: last.needs_wwcc ? 1 : 0,
+        ...teamChoice(last.each_team ? 'each' : String(last.team_id || '')),
         start_time: last.end_time, end_time: fromMin(Math.min(toMin(last.end_time) + (mins > 0 ? mins : 60), 23 * 60 + 55)) };
     }
-    current.slots.push(next);
+    current.rows.push(next);
     markDirty(); renderSlots();
     const els = $$('#slots .slot-edit'); els[els.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
@@ -537,7 +592,8 @@
     btn.disabled = true; btn.textContent = 'Saving…';
     const { _sched, _alertEmails, ...rest } = current;
     const sched = k => (!_sched || _sched[k].auto) ? null : _sched[k].dates.filter(Boolean);
-    const body = { ...rest, slots: current.slots.map(({ signups, start_utc, event_id, sort_order, ...s }) => s),
+    const { rows, team_ids, slots: _concrete, ...rest2 } = rest;
+    const body = { ...rest2, team_ids: team_ids || [], slots: rows.map(({ signups, start_utc, event_id, sort_order, ...s }) => s),
       gap_alerts: sched('gap'), roster_alerts: sched('roster'), gap_alert_emails: _alertEmails || [] };
     try {
       const { event } = current.id
@@ -605,7 +661,7 @@
   }
 
   function runModal() {
-    const shiftsOnly = current.slots.filter(s => s.kind !== 'item');
+    const shiftsOnly = current.rows.filter(s => s.kind !== 'item');
     const last = shiftsOnly[shiftsOnly.length - 1] || {};
     modal(`
       <h2>Add a run of shifts</h2>
@@ -616,7 +672,7 @@
         <div><label>People per shift</label><input type="number" id="r-cap" min="1" value="${esc(last.capacity || 2)}"></div></div>
       <div class="row"><div><label>From</label><input type="time" id="r-from" value="09:00" step="300"></div>
         <div><label>To</label><input type="time" id="r-to" value="13:00" step="300"></div></div>
-      ${teams && teams.length ? `<label>${esc(T().one)}</label><select id="r-team"><option value="">Everyone (whole event)</option>${teams.map(t => `<option value="${t.id}" ${Number(last.team_id) === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>` : ''}
+      ${teams && teams.length ? `<label>${esc(T().one)}</label><select id="r-team">${teamOptions(last)}</select>` : ''}
       <label class="check" style="margin-top:14px"><input type="checkbox" id="r-wwcc" ${last.needs_wwcc ? 'checked' : ''}> Needs a Working with Children Check</label>
       <label>Shift length</label>
       <select id="r-len"><option value="30">30 minutes</option><option value="60" selected>1 hour</option><option value="90">1.5 hours</option><option value="120">2 hours</option><option value="180">3 hours</option></select>
@@ -630,7 +686,7 @@
         // drop a blank starter slot if that's all there is
         dropBlankStarter();
         for (let t = from; t < to; t += len) {
-          current.slots.push({ title, details: $('#r-details', m).value, date, start_time: fromMin(t), end_time: fromMin(Math.min(t + len, to)), capacity: +$('#r-cap', m).value || 1, needs_wwcc: $('#r-wwcc', m).checked ? 1 : 0, team_id: $('#r-team', m)?.value ? +$('#r-team', m).value : null, signups: [] });
+          current.rows.push({ title, details: $('#r-details', m).value, date, start_time: fromMin(t), end_time: fromMin(Math.min(t + len, to)), capacity: +$('#r-cap', m).value || 1, needs_wwcc: $('#r-wwcc', m).checked ? 1 : 0, ...teamChoice($('#r-team', m)?.value || ''), signups: [] });
         }
         close(); markDirty(); renderSlots();
       };
@@ -685,14 +741,70 @@
       <label>New event name</label><input type="text" id="d-title" value="${esc(ev.title)}">
       <label>Date of the first slot (or drop-off)</label><input type="date" id="d-date" value="${esc(ev.slots[0]?.date || '')}">
       <p class="small muted">All slots move by the same number of days, so multi-day events stay in order.</p>
+      ${teams && teams.length ? `<label>${esc(T().many)} taking part in the copy</label>
+      <div class="chip-checks" id="d-teams">${teams.map(t => `<label class="chip-check"><input type="checkbox" value="${t.id}" ${(ev.team_ids || []).includes(t.id) ? 'checked' : ''}> ${esc(t.name)}</label>`).join('')}</div>
+      <p class="small muted">"Each ${esc(T().one.toLowerCase())}" jobs are created for every ticked one. Jobs for one that isn't ticked are left out.</p>` : ''}
       <div id="d-err"></div>
       <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="d-go">Duplicate</button></div>`,
     (m, close) => {
       $('#d-go', m).onclick = async () => {
         try {
-          const { event } = await call(`${A}/events/${ev.id}/duplicate`, { method: 'POST', body: { title: $('#d-title', m).value, new_date: $('#d-date', m).value } });
+          const { event } = await call(`${A}/events/${ev.id}/duplicate`, { method: 'POST', body: { title: $('#d-title', m).value, new_date: $('#d-date', m).value,
+            ...(teams && teams.length ? { team_ids: $$('#d-teams input:checked', m).map(c => +c.value) } : {}) } });
           close(); toast('Copy created as a draft.'); tab = 'setup'; location.hash = 'event/' + event.id;
         } catch (err) { $('#d-err', m).innerHTML = `<div class="error">${esc(err.message)}</div>`; }
+      };
+    });
+  }
+
+  /* ---------------- Message team managers ---------------- */
+  function managersModal(ev) {
+    const L = T(), today = new Date().toISOString().slice(0, 10);
+    const taking = (teams || []).filter(t => (ev.team_ids || []).includes(t.id));
+    const withEmail = taking.filter(t => t.manager_email), without = taking.filter(t => !t.manager_email);
+    const url = id => `${location.origin}/${slug}/event/${ev.id}${id ? `?team=${id}` : ''}`;
+    const statusLines = () => taking.map(t => {
+      const mine = ev.slots.filter(s => Number(s.team_id) === t.id && (s.date || '') >= today);
+      const cap = mine.reduce((n, s) => n + s.capacity, 0), filled = mine.reduce((n, s) => n + Math.min(s.capacity, s.signups.length), 0);
+      const open = mine.filter(s => s.signups.length < s.capacity).map(s => s.kind === 'item' ? s.title : `${s.title} ${tShort(s.start_time)}`);
+      return `• ${t.name}: ${filled} of ${cap} filled${open.length ? `. Still need: ${open.join(', ')}` : '. All done, thank you!'}\n  ${url(t.id)}`;
+    }).join('\n');
+    const role = L.role, roles = role + 's';
+    modal(`
+      <h2>Message ${esc(roles)}</h2>
+      <p class="small muted" style="margin-top:0">${withEmail.length} of ${taking.length} ${esc(L.many.toLowerCase())} taking part have an email for their ${esc(role)}${without.length ? ` (missing: ${esc(without.map(t => t.name).join(', '))}; add them on the ${esc(L.many)} page)` : ''}.</p>
+      <label for="mm-subject" style="margin-top:0">Subject <span class="opt">(email only)</span></label>
+      <input id="mm-subject" type="text" value="${esc(ev.title)}: volunteer update">
+      <label for="mm-msg">Message</label>
+      <textarea id="mm-msg" style="min-height:130px">Hi everyone,
+
+Here's where we're at with volunteers for ${esc(ev.title)}. Please share your ${esc(L.one.toLowerCase())}'s sign-up link with your parents so we can fill the remaining spots.
+
+Thank you!</textarea>
+      <label class="check"><input type="checkbox" id="mm-status" checked> Include each ${esc(L.one.toLowerCase())}'s status and sign-up link</label>
+      <div id="mm-preview" class="small muted" style="white-space:pre-wrap;background:#f6f7f9;border-radius:10px;padding:10px 12px;margin-top:8px;max-height:160px;overflow:auto"></div>
+      <div id="mm-err"></div>
+      <div class="actions" style="flex-wrap:wrap">
+        <button class="btn secondary" id="mm-copy">Copy text</button>
+        <button class="btn wa" id="mm-wa">Open WhatsApp</button>
+        <button class="btn" id="mm-email" ${withEmail.length ? '' : 'disabled'}>Email ${withEmail.length} ${esc(withEmail.length === 1 ? role : roles)}</button>
+      </div>
+      <p class="small muted" style="margin-bottom:0">WhatsApp: pick your ${esc(roles)}' group chat and press send. Email: each ${esc(role)} gets the message plus their own ${esc(L.one.toLowerCase())}'s list and a WhatsApp button for their parents. Replies come to you.</p>`,
+    (m, close) => {
+      const text = () => {
+        const msg = $('#mm-msg', m).value.trim();
+        return $('#mm-status', m).checked && taking.length ? `${msg}\n\n${statusLines()}` : msg;
+      };
+      const preview = () => { $('#mm-preview', m).textContent = $('#mm-status', m).checked ? statusLines() : 'Status not included.'; };
+      $('#mm-status', m).onchange = preview; preview();
+      $('#mm-copy', m).onclick = () => navigator.clipboard && navigator.clipboard.writeText(text()).then(() => toast('Message copied.'), () => {});
+      $('#mm-wa', m).onclick = () => { window.open('https://wa.me/?text=' + encodeURIComponent(text()), '_blank', 'noopener'); };
+      $('#mm-email', m).onclick = async () => {
+        const btn = $('#mm-email', m); btn.disabled = true; btn.textContent = 'Sending…';
+        try {
+          const r = await call(`${A}/events/${ev.id}/managers`, { method: 'POST', body: { subject: $('#mm-subject', m).value, message: $('#mm-msg', m).value, include_status: $('#mm-status', m).checked } });
+          close(); toast(`Sent to ${r.queued} ${r.queued === 1 ? role : roles}.`);
+        } catch (err) { $('#mm-err', m).innerHTML = `<div class="error">${esc(err.message)}</div>`; btn.disabled = false; btn.textContent = 'Try again'; }
       };
     });
   }
@@ -1043,17 +1155,40 @@
         <div><label for="cm-find">In titles, replace <span class="opt">(optional)</span></label><input type="text" id="cm-find" placeholder="e.g. Term 1"></div>
         <div><label for="cm-rep">with</label><input type="text" id="cm-rep" placeholder="e.g. Term 2"></div>
       </div>
+      <div id="cm-teams"></div>
       <div id="cm-err"></div>
       <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="cm-go">Copy events</button></div>`,
     (m, close) => {
+      // which teams take part in each copy (starts as the original's teams)
+      const chosen = {};
+      const renderTeams = () => {
+        const box = $('#cm-teams', m);
+        if (!teams || !teams.length) return;
+        const picked = sorted.filter(e => $(`#cm-list input[value="${e.id}"]`, m).checked);
+        if (!picked.length) { box.innerHTML = ''; return; }
+        const L = T();
+        box.innerHTML = `<label>${esc(L.many)} taking part in each copy</label>
+          <p class="small muted" style="margin:0 0 6px">"Each ${esc(L.one.toLowerCase())}" jobs are created for every one ticked; jobs for one that's unticked are left out.</p>
+          ${picked.map(e => {
+            const ids = chosen[e.id] ||= [...(e.team_ids || [])];
+            const others = teams.filter(t => !ids.includes(t.id));
+            return `<div class="cm-ev"><div class="small" style="font-weight:600">${esc(e.title)}</div>
+              <div class="chip-checks">${teams.filter(t => ids.includes(t.id)).map(t => `<label class="chip-check"><input type="checkbox" data-ev="${e.id}" value="${t.id}" checked> ${esc(t.name)}</label>`).join('')}
+              ${others.length ? `<select data-add="${e.id}" class="chip-add"><option value="">+ Add…</option>${others.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>` : ''}</div></div>`;
+          }).join('')}`;
+        $$('[data-ev]', box).forEach(c => c.onchange = () => { const id = +c.dataset.ev; chosen[id] = chosen[id].filter(x => x !== +c.value); renderTeams(); });
+        $$('[data-add]', box).forEach(sel => sel.onchange = () => { if (sel.value) { chosen[+sel.dataset.add].push(+sel.value); renderTeams(); } });
+      };
+      $$('#cm-list input', m).forEach(c => c.addEventListener('change', renderTeams));
       const pick = $('#cm-pick', m);
-      if (pick) pick.onchange = () => $$('#cm-list input', m).forEach(c => { c.checked = !!pick.value && c.dataset.date === pick.value; });
+      if (pick) pick.onchange = () => { $$('#cm-list input', m).forEach(c => { c.checked = !!pick.value && c.dataset.date === pick.value; }); renderTeams(); };
       $('#cm-go', m).onclick = async () => {
         const ids = $$('#cm-list input:checked', m).map(c => +c.value);
         if (!ids.length) { $('#cm-err', m).innerHTML = '<div class="error">Tick at least one event.</div>'; return; }
         const btn = $('#cm-go', m); btn.disabled = true; btn.textContent = 'Copying…';
         try {
-          const r = await call(A + '/events/duplicate-many', { method: 'POST', body: { ids, new_date: $('#cm-date', m).value, find: $('#cm-find', m).value, replace: $('#cm-rep', m).value } });
+          const r = await call(A + '/events/duplicate-many', { method: 'POST', body: { ids, new_date: $('#cm-date', m).value, find: $('#cm-find', m).value, replace: $('#cm-rep', m).value,
+            ...(teams && teams.length ? { teams: Object.fromEntries(ids.map(id => [id, chosen[id] || sorted.find(e => e.id === id)?.team_ids || []])) } : {}) } });
           close(); toast(`${r.created.length} event${r.created.length === 1 ? '' : 's'} copied as drafts. Check them, then tick "Live".`); showList();
         } catch (err) { $('#cm-err', m).innerHTML = `<div class="error">${esc(err.message)}</div>`; btn.disabled = false; btn.textContent = 'Copy events'; }
       };

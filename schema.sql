@@ -89,6 +89,12 @@ CREATE TABLE IF NOT EXISTS events (
   roster_alerts_sent TEXT NOT NULL DEFAULT '',
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Which teams are taking part in an event
+CREATE TABLE IF NOT EXISTS event_teams (
+  event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  team_id  INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  PRIMARY KEY (event_id, team_id)
+);
 CREATE INDEX IF NOT EXISTS idx_events_group ON events(group_id);
 
 CREATE TABLE IF NOT EXISTS slots (
@@ -98,6 +104,7 @@ CREATE TABLE IF NOT EXISTS slots (
   needs_wwcc   INTEGER NOT NULL DEFAULT 0,        -- 1 = volunteers must give a Working with Children Check
   is_food      INTEGER NOT NULL DEFAULT 1,        -- items only: 1 = ask for dietary info
   team_id      INTEGER,                           -- optional team this slot is for
+  job_key      TEXT NOT NULL DEFAULT '',          -- same key = one "each team" job, copied for every team taking part
   title        TEXT NOT NULL,
   details      TEXT NOT NULL DEFAULT '',
   date         TEXT NOT NULL,

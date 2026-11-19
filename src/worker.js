@@ -167,6 +167,7 @@ async function api(request, env, ctx, url) {
     }
     if (m === 'POST' && (e = rest.match(/^\/events\/(\d+)\/duplicate$/))) return adminDuplicate(request, env, group, +e[1]);
     if (m === 'POST' && (e = rest.match(/^\/events\/(\d+)\/email$/))) return adminEmailVolunteers(request, env, ctx, group, +e[1]);
+    if (m === 'POST' && (e = rest.match(/^\/events\/(\d+)\/managers$/))) return adminMessageManagers(request, env, ctx, group, user, +e[1]);
     if (m === 'POST' && rest === '/signups') return adminAddSignup(request, env, ctx, group);
     if (m === 'DELETE' && (e = rest.match(/^\/signups\/(\d+)$/))) return adminRemoveSignup(env, group, +e[1]);
   }
@@ -668,9 +669,11 @@ async function adminListEvents(env, group) {
       (SELECT MIN(date) FROM slots WHERE event_id = e.id) AS first_date,
       (SELECT MAX(date) FROM slots WHERE event_id = e.id) AS last_date,
       (SELECT COALESCE(SUM(capacity),0) FROM slots WHERE event_id = e.id) AS capacity,
-      (SELECT COUNT(*) FROM signups g JOIN slots s ON s.id = g.slot_id WHERE s.event_id = e.id) AS filled
+      (SELECT COUNT(*) FROM signups g JOIN slots s ON s.id = g.slot_id WHERE s.event_id = e.id) AS filled,
+      (SELECT GROUP_CONCAT(team_id) FROM event_teams WHERE event_id = e.id) AS team_list
     FROM events e WHERE e.group_id = ?
     ORDER BY (first_date IS NULL) DESC, first_date DESC, e.id DESC`).bind(group.id).all();
+  for (const e of results) { e.team_ids = e.team_list ? String(e.team_list).split(',').map(Number) : []; delete e.team_list; }
   return json({ events: results });
 }
 
@@ -688,6 +691,7 @@ async function adminGetEvent(env, group, id) {
   const bySlot = {};
   for (const g of signups) (bySlot[g.slot_id] ||= []).push(g);
   ev.slots = slots.map(s => ({ ...s, signups: bySlot[s.id] || [] }));
+  ev.team_ids = (await env.DB.prepare(`SELECT team_id FROM event_teams WHERE event_id = ?`).bind(id).all()).results.map(r => r.team_id);
   return json({ event: ev });
 }
 
@@ -712,8 +716,27 @@ async function adminSaveEvent(request, env, group, id) {
   ev.roster_alerts = readGapAlerts(body.roster_alerts);
   ev.gap_alert_emails = await readAlertEmails(env, group, body.gap_alert_emails);
   const tz = group.timezone;
-  const teamIds = new Set((await env.DB.prepare(`SELECT id FROM teams WHERE group_id = ?`).bind(group.id).all()).results.map(t => t.id));
-  const raw = Array.isArray(body.slots) ? body.slots : [];
+  const { results: groupTeams } = await env.DB.prepare(`SELECT id, name FROM teams WHERE group_id = ? ORDER BY sort_order, id`).bind(group.id).all();
+  const teamIds = new Set(groupTeams.map(t => t.id));
+  // teams taking part, in the group's team order
+  const wanted = new Set((Array.isArray(body.team_ids) ? body.team_ids : []).map(Number));
+  const taking = groupTeams.filter(t => wanted.has(t.id));
+  const takingIds = new Set(taking.map(t => t.id));
+  // an "each team" row becomes one slot per team taking part (matched to existing copies so sign-ups stay put)
+  const raw = [];
+  for (const s of (Array.isArray(body.slots) ? body.slots : [])) {
+    if (!s.each_team) {
+      if (s.team_id && !takingIds.has(Number(s.team_id))) {
+        const t = groupTeams.find(t => t.id === Number(s.team_id));
+        throw httpError(400, `"${s.title}" is for ${t ? t.name : 'a team'}, which isn't ticked as taking part. Tick it, or change the slot.`);
+      }
+      raw.push(s);
+      continue;
+    }
+    const key = /^[A-Za-z0-9_-]{6,40}$/.test(s.job_key || '') ? s.job_key : randomToken().slice(0, 12);
+    const ids = s.team_slot_ids && typeof s.team_slot_ids === 'object' ? s.team_slot_ids : {};
+    for (const t of taking) raw.push({ ...s, each_team: false, team_id: t.id, job_key: key, id: ids[t.id] || ids[String(t.id)] || null });
+  }
   if (raw.length > 300) throw httpError(400, 'That is a lot of slots! Please split this into more than one event.');
   if (raw.some(s => s.kind === 'item')) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(ev.dropoff_date)) throw httpError(400, 'Items to bring need a drop-off date.');
@@ -731,6 +754,7 @@ async function adminSaveEvent(request, env, group, id) {
       capacity: Math.max(1, Math.min(500, parseInt(s.capacity, 10) || 1)), sort_order: i,
       needs_wwcc: !isItem && (s.needs_wwcc === true || s.needs_wwcc === 1 || s.needs_wwcc === '1') ? 1 : 0,
       team_id: teamIds.has(Number(s.team_id)) ? Number(s.team_id) : null,
+      job_key: s.job_key && s.team_id ? String(s.job_key).slice(0, 40) : '',
       is_food: isItem && (s.is_food === undefined || s.is_food === true || s.is_food === 1 || s.is_food === '1') ? 1 : 0,
     };
     if (!isItem) {
@@ -741,7 +765,8 @@ async function adminSaveEvent(request, env, group, id) {
     slot.start_utc = localToUtc(slot.date, slot.start_time, tz).toISOString();
     return slot;
   });
-  if (!slots.length) throw httpError(400, 'Add at least one time slot or item.');
+  if (!slots.length) throw httpError(400, taking.length || !(body.slots || []).some(s => s.each_team)
+    ? 'Add at least one time slot or item.' : 'Tick the teams taking part, so the "each team" jobs can be created.');
   const lastDate = slots.reduce((m, s) => s.date > m ? s.date : m, '');
   if (ev.gap_alerts && ev.gap_alerts.split(',').some(d => d > lastDate)) throw httpError(400, 'Unfilled spot alert dates must be on or before the event.');
   if (ev.roster_alerts && ev.roster_alerts.split(',').some(d => d > lastDate)) throw httpError(400, "\"Who's doing what\" dates must be on or before the event.");
@@ -762,11 +787,11 @@ async function adminSaveEvent(request, env, group, id) {
       .bind(ev.title, ev.description, ev.location, ev.contact_name, ev.contact_email, ev.published,
         ev.dropoff_date, ev.dropoff_time, ev.dropoff_note, ev.donation_url, ev.donation_text, ev.gap_alerts, ev.gap_alert_emails, ev.roster_alerts, id, group.id));
     const { results: existing } = await env.DB.prepare(
-      `SELECT s.id, s.title, (SELECT COUNT(*) FROM signups WHERE slot_id = s.id) AS n FROM slots s WHERE s.event_id = ?`).bind(id).all();
+      `SELECT s.id, s.title, t.name AS team, (SELECT COUNT(*) FROM signups WHERE slot_id = s.id) AS n FROM slots s LEFT JOIN teams t ON t.id = s.team_id WHERE s.event_id = ?`).bind(id).all();
     const keep = new Set(slots.filter(s => s.id).map(s => s.id));
     for (const ex of existing) {
       if (keep.has(ex.id)) continue;
-      if (ex.n > 0) throw httpError(400, `"${ex.title}" has ${ex.n} volunteer(s). Remove them first before deleting the slot.`);
+      if (ex.n > 0) throw httpError(400, `"${ex.team ? ex.team + ': ' : ''}${ex.title}" has ${ex.n} volunteer(s). Remove them first before deleting the slot or the team.`);
       stmts.push(env.DB.prepare(`DELETE FROM slots WHERE id = ?`).bind(ex.id));
     }
     for (const s of slots.filter(s => s.id)) {
@@ -776,11 +801,13 @@ async function adminSaveEvent(request, env, group, id) {
     }
   }
   for (const s of slots) {
-    if (s.id) stmts.push(env.DB.prepare(`UPDATE slots SET kind=?, title=?, details=?, date=?, start_time=?, end_time=?, capacity=?, start_utc=?, sort_order=?, needs_wwcc=?, is_food=?, team_id=? WHERE id=? AND event_id=?`)
-      .bind(s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order, s.needs_wwcc, s.is_food, s.team_id, s.id, id));
-    else stmts.push(env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order, needs_wwcc, is_food, team_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(id, s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order, s.needs_wwcc, s.is_food, s.team_id));
+    if (s.id) stmts.push(env.DB.prepare(`UPDATE slots SET kind=?, title=?, details=?, date=?, start_time=?, end_time=?, capacity=?, start_utc=?, sort_order=?, needs_wwcc=?, is_food=?, team_id=?, job_key=? WHERE id=? AND event_id=?`)
+      .bind(s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order, s.needs_wwcc, s.is_food, s.team_id, s.job_key, s.id, id));
+    else stmts.push(env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order, needs_wwcc, is_food, team_id, job_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(id, s.kind, s.title, s.details, s.date, s.start_time, s.end_time, s.capacity, s.start_utc, s.sort_order, s.needs_wwcc, s.is_food, s.team_id, s.job_key));
   }
+  stmts.push(env.DB.prepare(`DELETE FROM event_teams WHERE event_id = ?`).bind(id));
+  for (const t of taking) stmts.push(env.DB.prepare(`INSERT INTO event_teams (event_id, team_id) VALUES (?, ?)`).bind(id, t.id));
   if (stmts.length) await env.DB.batch(stmts);
   return adminGetEvent(env, group, id);
 }
@@ -790,6 +817,7 @@ async function adminDeleteEvent(env, group, id) {
   await env.DB.batch([
     env.DB.prepare(`DELETE FROM signups WHERE slot_id IN (SELECT id FROM slots WHERE event_id = ?)`).bind(id),
     env.DB.prepare(`DELETE FROM slots WHERE event_id = ?`).bind(id),
+    env.DB.prepare(`DELETE FROM event_teams WHERE event_id = ?`).bind(id),
     env.DB.prepare(`DELETE FROM events WHERE id = ? AND group_id = ?`).bind(id, group.id),
   ]);
   return json({ ok: true });
@@ -802,7 +830,7 @@ async function adminDuplicate(request, env, group, id) {
   let shift = 0;
   if (/^\d{4}-\d{2}-\d{2}$/.test(body.new_date || '') && first)
     shift = Math.round((Date.parse(body.new_date + 'T00:00:00Z') - Date.parse(first + 'T00:00:00Z')) / 86400e3);
-  const newId = await duplicateOne(env, group, src, shift, opt(body.title, 120) || `${src.title} (copy)`);
+  const newId = await duplicateOne(env, group, src, shift, opt(body.title, 120) || `${src.title} (copy)`, body.team_ids);
   return adminGetEvent(env, group, newId);
 }
 
@@ -824,13 +852,29 @@ async function adminDuplicateMany(request, env, group) {
   for (const src of srcs) {
     let title = find && src.title.includes(find) ? src.title.split(find).join(replace) : src.title;
     if (title === src.title) title = `${src.title} (copy)`;
-    created.push(await duplicateOne(env, group, src, shift, title.slice(0, 120)));
+    const teamsFor = body.teams && typeof body.teams === 'object' ? body.teams[src.id] ?? body.teams[String(src.id)] : undefined;
+    created.push(await duplicateOne(env, group, src, shift, title.slice(0, 120), teamsFor));
   }
   return json({ ok: true, created });
 }
 
-async function duplicateOne(env, group, src, shift, title) {
+// teamIds: the teams taking part in the copy (undefined = same as the original).
+// "Each team" jobs are created for every team taking part; slots for a team that isn't taking part are left out.
+async function duplicateOne(env, group, src, shift, title, teamIds) {
   const { results: slots } = await env.DB.prepare(`SELECT * FROM slots WHERE event_id = ? ORDER BY date, start_time, sort_order, id`).bind(src.id).all();
+  const { results: groupTeams } = await env.DB.prepare(`SELECT id FROM teams WHERE group_id = ? ORDER BY sort_order, id`).bind(group.id).all();
+  const srcTeams = (await env.DB.prepare(`SELECT team_id FROM event_teams WHERE event_id = ?`).bind(src.id).all()).results.map(r => r.team_id);
+  const want = new Set(Array.isArray(teamIds) ? teamIds.map(Number) : srcTeams);
+  const taking = groupTeams.map(t => t.id).filter(id => want.has(id));
+  const out = [], seenJobs = new Set();
+  for (const s of slots) {
+    if (s.job_key) {
+      if (seenJobs.has(s.job_key)) continue;
+      seenJobs.add(s.job_key);
+      const key = randomToken().slice(0, 12);
+      for (const t of taking) out.push({ ...s, team_id: t, job_key: key });
+    } else if (!s.team_id || want.has(s.team_id)) out.push(s);
+  }
   const shiftList = v => v ? v.split(',').map(d => addDays(d, shift)).join(',') : (v ?? null);
   const r = await env.DB.prepare(`INSERT INTO events (group_id, title, description, location, contact_name, contact_email, published,
     dropoff_date, dropoff_time, dropoff_note, donation_url, donation_text, gap_alerts, gap_alert_emails, roster_alerts) VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,?)`)
@@ -838,11 +882,12 @@ async function duplicateOne(env, group, src, shift, title) {
       src.dropoff_date ? addDays(src.dropoff_date, shift) : '', src.dropoff_time, src.dropoff_note, src.donation_url, src.donation_text,
       shiftList(src.gap_alerts), src.gap_alert_emails || '', shiftList(src.roster_alerts)).run();
   const newId = r.meta.last_row_id;
-  const stmts = slots.map(s => {
+  const stmts = out.map(s => {
     const date = addDays(s.date, shift);
-    return env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order, needs_wwcc, is_food, team_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(newId, s.kind, s.title, s.details, date, s.start_time, s.end_time, s.capacity, localToUtc(date, s.start_time, group.timezone).toISOString(), s.sort_order, s.needs_wwcc || 0, s.is_food ?? 1, s.team_id ?? null);
+    return env.DB.prepare(`INSERT INTO slots (event_id, kind, title, details, date, start_time, end_time, capacity, start_utc, sort_order, needs_wwcc, is_food, team_id, job_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(newId, s.kind, s.title, s.details, date, s.start_time, s.end_time, s.capacity, localToUtc(date, s.start_time, group.timezone).toISOString(), s.sort_order, s.needs_wwcc || 0, s.is_food ?? 1, s.team_id ?? null, s.job_key || '');
   });
+  for (const t of taking) stmts.push(env.DB.prepare(`INSERT INTO event_teams (event_id, team_id) VALUES (?, ?)`).bind(newId, t));
   if (stmts.length) await env.DB.batch(stmts);
   return newId;
 }
@@ -874,7 +919,8 @@ async function saveTeams(request, env, group) {
   const keep = new Set(teams.filter(t => t.id && existing.has(t.id)).map(t => t.id));
   const stmts = [];
   for (const id of existing) if (!keep.has(id)) {
-    stmts.push(env.DB.prepare(`UPDATE slots SET team_id = NULL WHERE team_id = ?`).bind(id));
+    stmts.push(env.DB.prepare(`UPDATE slots SET team_id = NULL, job_key = '' WHERE team_id = ?`).bind(id));
+    stmts.push(env.DB.prepare(`DELETE FROM event_teams WHERE team_id = ?`).bind(id));
     stmts.push(env.DB.prepare(`DELETE FROM teams WHERE id = ? AND group_id = ?`).bind(id, group.id));
   }
   for (const t of teams) {
@@ -906,6 +952,55 @@ async function adminEmailVolunteers(request, env, ctx, group, id) {
   }
   ctx.waitUntil(processQueue(env));
   return json({ ok: true, queued: people.size });
+}
+
+// Email the managers of the teams taking part, each with their own team's status and share button
+async function adminMessageManagers(request, env, ctx, group, user, id) {
+  const body = await readJson(request);
+  const subject = req(body.subject, 'Subject', 200);
+  const message = req(body.message, 'Message', 10000);
+  const withStatus = body.include_status !== false;
+  const ev = await loadEvent(env, group, id);
+  const now = new Date().toISOString();
+  const { results: teams } = await env.DB.prepare(`
+    SELECT t.* FROM event_teams et JOIN teams t ON t.id = et.team_id WHERE et.event_id = ? AND t.manager_email != '' ORDER BY t.sort_order, t.id`).bind(id).all();
+  if (!teams.length) throw httpError(400, 'None of the teams taking part have a manager email yet. Add them on the teams page.');
+  const { results: slots } = await env.DB.prepare(`
+    SELECT s.*, t.name AS team_name FROM slots s LEFT JOIN teams t ON t.id = s.team_id
+    WHERE s.event_id = ? AND s.start_utc > ? ORDER BY s.date, s.start_time, s.sort_order, s.id`).bind(id, now).all();
+  const { results: people } = await env.DB.prepare(`
+    SELECT g.slot_id, g.first_name, g.last_name, g.item_desc FROM signups g JOIN slots s ON s.id = g.slot_id WHERE s.event_id = ? ORDER BY g.id`).bind(id).all();
+  for (const sl of slots) { sl.people = people.filter(p => p.slot_id === sl.id); sl.left = Math.max(0, sl.capacity - sl.people.length); }
+  // one email per manager, even if they manage more than one team here
+  const byEmail = new Map();
+  for (const t of teams) {
+    const key = t.manager_email.toLowerCase();
+    if (!byEmail.has(key)) byEmail.set(key, { name: t.manager_name, teams: [] });
+    byEmail.get(key).teams.push(t);
+  }
+  const replyTo = user.email || ev.contact_email || group.contact_email || null;
+  for (const [to, m] of byEmail) {
+    const sections = !withStatus ? '' : m.teams.map(t => {
+      const mine = slots.filter(sl => sl.team_id === t.id);
+      const open = mine.filter(sl => sl.left > 0);
+      const filled = mine.reduce((n, sl) => n + sl.capacity - sl.left, 0), cap = mine.reduce((n, sl) => n + sl.capacity, 0);
+      const team = { id: t.id, name: t.name };
+      const wa = `https://wa.me/?text=${encodeURIComponent(open.length ? gapShareText(env, group, ev, open, team) : rosterShareText(env, group, ev, mine, team))}`;
+      return `<div style="border-top:1px solid #e5e8ec;padding-top:12px;margin-top:12px">
+        <div style="font-weight:bold;font-size:17px">${esc(t.name)}: ${filled} of ${cap} spot${cap === 1 ? '' : 's'} filled</div>
+        ${mine.length ? slotListHtml(mine, 'roster', team) : '<p style="color:#888">No jobs for this team yet.</p>'}
+        ${mine.length ? button(wa, open.length ? `Ask ${t.name} parents on WhatsApp` : `Share ${t.name}'s helpers on WhatsApp`, '#1f8a4c') : ''}
+        <p style="margin-top:-10px;font-size:14px">Sign-up link for your team: <a href="${eventLink(env, group, ev, t.id)}" style="color:${group.accent}">${eventLink(env, group, ev, t.id)}</a></p>
+      </div>`;
+    }).join('');
+    await enqueue(env, {
+      group_id: group.id, to, subject, reply_to: replyTo,
+      html: groupEmail(env, group, `<p>Hi${m.name ? ' ' + esc(m.name.split(' ')[0]) : ''},</p>${paragraphs(message)}${sections}
+        <p style="color:#888;font-size:13px">You're getting this as ${TEAM_LABELS[teamLabel(group)]} for ${esc(m.teams.map(t => t.name).join(', '))} at ${esc(ev.title)}. Reply to this email to reach the organiser.</p>`),
+    });
+  }
+  ctx.waitUntil(processQueue(env));
+  return json({ ok: true, queued: byEmail.size });
 }
 
 async function adminAddSignup(request, env, ctx, group) {
