@@ -102,8 +102,8 @@
       ${groupNav('events')}
       <div class="toolbar">
         <h1 style="margin:0">Events</h1><span class="spacer"></span>
-        ${events.length ? '<button class="btn secondary" id="copymany">Copy several</button>' : ''}
         <button class="btn" id="new">+ New event</button>
+        ${events.length ? '<button class="btn secondary" id="copymany">Copy event</button>' : ''}
       </div>
       ${emailWarningsHtml(status)}
       <h2>Upcoming and drafts</h2>${table(upcoming, 'No upcoming events yet. Create one, or duplicate a past event.')}
@@ -1331,8 +1331,8 @@
     const sorted = [...events].sort((a, b) => (b.first_date || '').localeCompare(a.first_date || '') || b.id - a.id);
     const dates = [...new Set(sorted.map(e => e.first_date).filter(Boolean))];
     modal(`
-      <h2>Copy several events</h2>
-      <p class="small muted">Handy for things that repeat, like a carnival, gala day or working bee with several events. Copies start as drafts, with the same slots and update schedule, moved to the new date. Volunteers aren't copied.</p>
+      <h2>Copy event</h2>
+      <p class="small muted">Copy one event, or several at once (like a whole gala day or carnival), to a new date. Copies start as drafts, with the same slots and update schedule, moved to the new date. Volunteers aren't copied.</p>
       ${dates.length ? `<label for="cm-pick" style="margin-top:0">Quick pick</label>
       <select id="cm-pick"><option value="">Tick events below, or pick a date</option>${dates.map(d => `<option value="${d}">All events on ${esc(fmtDateShort(d))}</option>`).join('')}</select>` : ''}
       <div class="stack" id="cm-list" style="gap:4px;margin-top:10px;max-height:260px;overflow-y:auto">${sorted.map(e => `
@@ -1341,9 +1341,10 @@
       <label for="cm-date">New date <span class="opt">(for the earliest of the chosen events; the rest keep their spacing)</span></label>
       <input type="date" id="cm-date">
       <div class="row">
-        <div><label for="cm-find">In titles, replace <span class="opt">(optional)</span></label><input type="text" id="cm-find" placeholder="e.g. Term 1"></div>
-        <div><label for="cm-rep">with</label><input type="text" id="cm-rep" placeholder="e.g. Term 2"></div>
+        <div><label for="cm-find">Rename the copies: change <span class="opt">(optional)</span></label><input type="text" id="cm-find" placeholder="e.g. Gala Day 1"></div>
+        <div><label for="cm-rep">to</label><input type="text" id="cm-rep" placeholder="e.g. Gala Day 2"></div>
       </div>
+      <p class="small muted" style="margin:4px 0 0">Changes that wording in every copied event's name, so "Gala Day 1: Under 12s" becomes "Gala Day 2: Under 12s". Leave blank and copies are named "… (copy)".</p>
       <div id="cm-teams"></div>
       <div id="cm-err"></div>
       <div class="actions"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="cm-go">Copy events</button></div>`,
