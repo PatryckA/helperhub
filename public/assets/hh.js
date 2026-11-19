@@ -14,6 +14,15 @@
     committees:  { one: 'Committee', many: 'Committees', role: 'committee lead', ex: ['Fundraising', 'Grounds', 'Events'] },
     areas:       { one: 'Area', many: 'Areas', role: 'area coordinator', ex: ['Canteen', 'Uniform shop', 'Garden'] },
   };
+  // Kinds of group, with the word used for the settings tab. Keys match GROUP_KINDS in the worker.
+  window.GROUP_KINDS = {
+    school:    { label: 'P&C (Parents and Citizens)', settings: 'P&C settings' },
+    parents:   { label: "P&F, parents' club or school council", settings: 'School settings' },
+    sport:     { label: 'Sports club', settings: 'Club settings' },
+    community: { label: 'Community group or charity', settings: 'Group settings' },
+    other:     { label: 'Other', settings: 'Group settings' },
+  };
+  window.kindInfo = g => GROUP_KINDS[g && g.kind] || GROUP_KINDS.other;
   window.teamTerms = g => TEAM_LABELS[g && g.team_label] || TEAM_LABELS.teams;
 
   window.store = {

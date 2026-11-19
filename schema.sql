@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS groups (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   slug          TEXT NOT NULL UNIQUE,              -- web address: helperhub.au/<slug>
   name          TEXT NOT NULL,
-  kind          TEXT NOT NULL DEFAULT '',          -- school, sport, community, other
+  kind          TEXT NOT NULL DEFAULT '',          -- school (P&C), parents (P&F etc), sport, community, other
   status        TEXT NOT NULL DEFAULT 'pending',   -- pending (email not verified) | active | suspended
   accent        TEXT NOT NULL DEFAULT '#2f7d6d',
   has_logo      INTEGER NOT NULL DEFAULT 0,

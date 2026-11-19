@@ -219,7 +219,7 @@ async function createGroup(request, env, ctx) {
   const slug = normaliseSlug(body.slug || name);
   const problem = slugProblem(slug);
   if (problem) throw httpError(400, problem);
-  const kind = ['school', 'sport', 'community', 'other'].includes(body.kind) ? body.kind : 'other';
+  const kind = GROUP_KINDS.includes(body.kind) ? body.kind : 'other';
   const yourName = req(body.your_name, 'Your name', 80);
   const email = req(body.email, 'Email', 200).toLowerCase();
   if (!isEmail(email)) throw httpError(400, 'Please check your email address.');
@@ -407,7 +407,9 @@ async function activeGroup(env, slug) {
 // What a group calls its sub-groups. Keys match TEAM_LABELS in public/assets/hh.js.
 const TEAM_LABELS = { teams: 'team manager', classes: 'class parent', year_groups: 'year group contact', age_groups: 'age group coordinator',
   stalls: 'stall coordinator', committees: 'committee lead', areas: 'area coordinator' };
-function teamLabel(g) { return TEAM_LABELS[g.team_label] ? g.team_label : (g.kind === 'school' ? 'classes' : 'teams'); }
+// Kinds of group (labels live in public/assets/hh.js)
+const GROUP_KINDS = ['school', 'parents', 'sport', 'community', 'other'];
+function teamLabel(g) { return TEAM_LABELS[g.team_label] ? g.team_label : (g.kind === 'school' || g.kind === 'parents' ? 'classes' : 'teams'); }
 
 function publicGroup(env, g) {
   return {
@@ -580,6 +582,7 @@ async function saveSettings(request, env, group) {
   const b = await readJson(request);
   const s = {
     name: req(b.name, 'Group name', 80),
+    kind: GROUP_KINDS.includes(b.kind) ? b.kind : group.kind,
     accent: /^#[0-9a-f]{6}$/i.test(b.accent || '') ? b.accent.toLowerCase() : group.accent,
     welcome_text: opt(b.welcome_text, 1000),
     contact_name: opt(b.contact_name, 100),
@@ -593,9 +596,9 @@ async function saveSettings(request, env, group) {
   };
   if (s.contact_email && !isEmail(s.contact_email)) throw httpError(400, 'Contact email does not look right.');
   if (s.donation_url && !isHttpsUrl(s.donation_url)) throw httpError(400, 'The donation link must start with https://');
-  await env.DB.prepare(`UPDATE groups SET name=?, accent=?, welcome_text=?, contact_name=?, contact_email=?, reminder_hours=?, timezone=?,
+  await env.DB.prepare(`UPDATE groups SET name=?, kind=?, accent=?, welcome_text=?, contact_name=?, contact_email=?, reminder_hours=?, timezone=?,
     donation_url=?, donation_text=?, question_label=?, question_required=? WHERE id=?`)
-    .bind(s.name, s.accent, s.welcome_text, s.contact_name, s.contact_email, s.reminder_hours, s.timezone,
+    .bind(s.name, s.kind, s.accent, s.welcome_text, s.contact_name, s.contact_email, s.reminder_hours, s.timezone,
       s.donation_url, s.donation_text, s.question_label, s.question_required, group.id).run();
   const g = await env.DB.prepare(`SELECT * FROM groups WHERE id = ?`).bind(group.id).first();
   return json({ group: adminGroup(env, g) });

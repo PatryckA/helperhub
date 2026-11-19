@@ -264,3 +264,4 @@ table.list td.actions { white-space: nowrap; text-align: right; }
 .list td { overflow-wrap: anywhere; }
 .show-sm { display: none; }
 @media (max-width: 640px) { .show-sm { display: block; margin-top: 2px; } }
+@media (max-width: 480px) { .tabs:not(.sub) button { padding-left: 9px; padding-right: 9px; font-size: 15px; } }

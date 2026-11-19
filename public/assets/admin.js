@@ -30,7 +30,7 @@
     return `<div class="tabs" style="margin-top:16px">
       <button data-nav="" class="${active === 'events' ? 'active' : ''}">Events</button>
       <button data-nav="teams" class="${active === 'teams' ? 'active' : ''}">${esc(T().many)}</button>
-      <button data-nav="settings" class="${active === 'settings' ? 'active' : ''}">Settings</button>
+      <button data-nav="settings" class="${active === 'settings' ? 'active' : ''}">${esc(kindInfo(group).settings)}</button>
       <button data-nav="organisers" class="${active === 'organisers' ? 'active' : ''}">Organisers</button>
     </div>`;
   }
@@ -940,13 +940,15 @@ Thank you!</textarea>
     const g = { ...group };
     app.innerHTML = `
       ${groupNav('settings')}
-      <h1 style="margin:0 0 6px">Group settings</h1>
+      <h1 style="margin:0 0 6px">${esc(kindInfo(g).settings)}</h1>
       <p class="muted" style="margin:0 0 16px">Your volunteer page: <a href="/${esc(slug)}" target="_blank">helperhub.au/${esc(slug)}</a></p>
       <form id="sform" class="stack">
         <div class="card">
           <h2 style="margin-top:0">Look and feel</h2>
-          <label for="s-name">Group name</label>
+          <label for="s-name">Name</label>
           <input id="s-name" type="text" maxlength="80" value="${esc(g.name)}">
+          <label for="s-kind">Type of group</label>
+          <select id="s-kind">${Object.entries(GROUP_KINDS).map(([k, v]) => `<option value="${k}" ${k === (g.kind || 'other') ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</select>
           <label>Logo <span class="opt">(PNG or JPG, square-ish works best)</span></label>
           <div class="logo-box">
             <span id="logo-preview">${g.logo_url ? `<img src="${esc(g.logo_url)}" alt="Current logo">` : '<span class="muted small">No logo yet</span>'}</span>
@@ -1008,7 +1010,7 @@ Thank you!</textarea>
       btn.disabled = true;
       try {
         const r = await call(A + '/settings', { method: 'PUT', body: {
-          name: $('#s-name').value, accent: g.accent, welcome_text: $('#s-welcome').value,
+          name: $('#s-name').value, kind: $('#s-kind').value, accent: g.accent, welcome_text: $('#s-welcome').value,
           contact_name: $('#s-cn').value, contact_email: $('#s-ce').value, reminder_hours: +$('#s-rem').value, timezone: $('#s-tz').value,
           question_label: $('#s-q').value, question_required: $('#s-qr').checked, donation_url: $('#s-du').value, donation_text: $('#s-dx').value,
         } });
